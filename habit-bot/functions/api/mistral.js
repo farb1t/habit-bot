@@ -15,23 +15,20 @@ export async function onRequestPost({ request, env }) {
           { role: "system", content: system },
           { role: "user", content: user }
         ],
-        // жёстко просим JSON, чтобы фронт стабильно парсил
         response_format: { type: "json_object" }
       })
     });
 
     if (!upstream.ok) {
       const details = await upstream.text();
-      return new Response(
-        JSON.stringify({ error: "Upstream error", details }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Upstream error", details }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     const data = await upstream.json();
     const content = data?.choices?.[0]?.message?.content || "{}";
-
-    // Ровно то, что ждёт фронт (патч)
     return new Response(JSON.stringify({ content }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
