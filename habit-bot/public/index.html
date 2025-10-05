@@ -1394,7 +1394,7 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
     const s = getState() || {};
     const v = (s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
     if(chip){
-      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || querySelector('.txt');
+      let txt = chip.querySelector('.series-text') || chip.querySelector('.txt');
       if(txt){ txt.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']); }
     }
   }
