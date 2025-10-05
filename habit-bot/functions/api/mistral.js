@@ -3,7 +3,7 @@ export async function onRequestPost({ request, env }) {
   try {
     const { system, user } = await request.json();
 
-    const upstream = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    const r = await fetch("https://api.mistral.ai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -15,20 +15,23 @@ export async function onRequestPost({ request, env }) {
           { role: "system", content: system },
           { role: "user", content: user }
         ],
+        // просим строгий JSON на выходе
         response_format: { type: "json_object" }
       })
     });
 
-    if (!upstream.ok) {
-      const details = await upstream.text();
-      return new Response(JSON.stringify({ error: "Upstream error", details }), {
+    if (!r.ok) {
+      const txt = await r.text();
+      return new Response(JSON.stringify({ error: "Upstream error", details: txt }), {
         status: 500,
         headers: { "Content-Type": "application/json" }
       });
     }
 
-    const data = await upstream.json();
+    const data = await r.json();
     const content = data?.choices?.[0]?.message?.content || "{}";
+
+    // та же форма ответа, которую ждёт ваш фронтенд
     return new Response(JSON.stringify({ content }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
@@ -41,6 +44,7 @@ export async function onRequestPost({ request, env }) {
   }
 }
 
+// (GET-запросы можно заблокировать, чтобы не палить эндпоинт)
 export async function onRequestGet() {
   return new Response("Method Not Allowed", { status: 405 });
 }
