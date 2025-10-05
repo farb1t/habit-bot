@@ -694,128 +694,26 @@ listRoot.appendChild(card);
     renderProfile();
   }
 
-  // Chat (same simple flow as before)
-  function pushMsg(text, from='you'){
-    const b = document.createElement('div');
-    b.className = from==='you' ? 'bubble you' : 'bubble bot';
-    b.textContent = text;
-    messages.appendChild(b);
-    messages.scrollTop = messages.scrollHeight;
-  }
-  
-  function parseHabitIntent(text){
-    const t = text.trim();
-    // Normalize spaces
-    let clean = t.replace(/\s+/g,' ').trim();
+// --- Minimal chat stub (no legacy bot logic) ---
+function pushMsg(text, from='you'){
+  const b = document.createElement('div');
+  b.className = from === 'you' ? 'bubble you' : 'bubble bot';
+  b.textContent = text;
+  messages.appendChild(b);
+  messages.scrollTop = messages.scrollHeight;
+}
 
-    // Extract number of days (1..365)
-    const numMatch = clean.match(/(\d{1,3})/);
-    const days = numMatch ? Math.max(1, Math.min(365, parseInt(numMatch[1],10))) : null;
+function send(){
+  const t = (chatInput?.value || '').trim();
+  if(!t) return;
+  pushMsg(t, 'you');
+  chatInput.value = '';
+  // Никакой старой логики тут нет — дальше подключится патч Mistral (он перехватывает window.send)
+}
 
-    // Remove helper words and the number to isolate a probable name
-    let name = clean
-      .replace(/^(добав(ь|и)|добавить|создай|создать|прибавь|сделай)\s*/i,'')
-      .replace(/\bна\s+\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
-      .replace(/\b\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
-      .replace(/\bдн(я|ей)?\b/gi,'')
-      .replace(/\bдень\b/gi,'')
-      .replace(/\s+/g,' ').trim();
+sendBtn?.addEventListener('click', send);
+chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
 
-    // If message looks like a habit name (2..40 chars) and not only filler words
-    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(name || '') && !/дн|дней|day|days/i.test(name || '');
-
-    if(looksLikeName){
-      return { name, days };
-    }
-    // If the whole text looks like a name (without cleaning)
-    const asName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(clean) && !/дн|дней|day|days/i.test(clean);
-    if(asName){
-      return { name: clean, days };
-    }
-    return null;
-  }
-
-  function botReply(q){
-    const text = q.trim();
-
-    // If we're waiting for duration, prioritize that flow
-    if(state.pending && state.pending.type==='duration' && state.pending.habitId){
-      const num = (text.match(/(\d{1,3})/)||[])[1];
-      if(num){
-        const n = Math.max(1, Math.min(365, parseInt(num,10)));
-        const h = state.habits.find(x=>x.id===state.pending.habitId);
-        if(h){ h.targetDays = n; saveState(state); renderAll(); }
-        pushMsg(`Отлично, ставлю срок: ${n} дней.`, 'bot');
-        state.pending = null; saveState(state);
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg('Напиши число дней, например: 30', 'bot');
-        return;
-      }
-    }
-
-    // New: try to parse full intent from a single message
-    const parsed = parseHabitIntent(text);
-    if(parsed && parsed.name){
-      const h = createHabit(parsed.name);
-      if(parsed.days){
-        h.targetDays = parsed.days;
-        saveState(state); renderAll();
-        pushMsg(`Добавил: «${h.name}» на ${parsed.days} дней. Удачи!`, 'bot');
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-        state.pending = { type:'duration', habitId: h.id }; saveState(state);
-        return;
-      }
-    }
-
-    // Legacy flows below kept for compatibility
-    if(state.pending && state.pending.type==='name'){
-      const name = text.replace(/^привыч(ка|ку)?\s*/i, '').trim() || 'Новая привычка';
-      const h = createHabit(name);
-      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-      state.pending = { type:'duration', habitId: h.id }; saveState(state);
-      return;
-    }
-
-    const numInline = (text.match(/(\d{1,3})/)||[])[1];
-    if(numInline){
-      const h = state.habits[0];
-      if(h){
-        const n = Math.max(1, Math.min(365, parseInt(numInline,10)));
-        h.targetDays = n; saveState(state); renderAll();
-        pushMsg(`Ок, срок для «${h.name}»: ${n} дней.`, 'bot');
-        return;
-      }
-    }
-
-    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(text) && !/дн|дней|day|days/i.test(text);
-    if(looksLikeName){
-      const h = createHabit(text);
-      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-      state.pending = { type:'duration', habitId: h.id }; saveState(state);
-      return;
-    }
-
-    if(!state.habits || state.habits.length===0){
-      pushMsg('Что добавить в привычки? Просто напиши короткое название, например: «Пить воду».', 'bot');
-      state.pending = { type:'name' }; saveState(state);
-    } else {
-      pushMsg('Напиши название привычки, которую добавить. Можно сразу указать срок: «Пить воду 30».', 'bot');
-      state.pending = { type:'name' }; saveState(state);
-    }
-  }
-
-  function send(){
-    const t = (chatInput?.value||'').trim();
-    if(!t) return;
-    pushMsg(t, 'you'); chatInput.value=''; botReply(t);
-  }
-  sendBtn?.addEventListener('click', send);
-  chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
 
 
   // Avatar upload handler
@@ -862,14 +760,7 @@ listRoot.appendChild(card);
     }
   }catch(e){}
 
-  try{
-    const welcomedKey = 'habit_welcome_shown';
-    const was = sessionStorage.getItem(welcomedKey);
-    if(!was){
-      pushMsg('Привет! Напиши короткое название привычки — я добавлю её и спрошу срок (в днях).', 'bot');
-      sessionStorage.setItem(welcomedKey, '1');
-    }
-  }catch(e){}
+ 
 
   // Debug badge
   try{
@@ -1898,109 +1789,87 @@ document.addEventListener('DOMContentLoaded', function(){
 })();
 </script>
 
-
 <script>
 /*
 Mistral AI integration for your habit tracker (no external calendar services).
-Drop this <script> AFTER your existing big <script> block, right before </body>.
-It adds:
-- callMistral(): fetches a plan from Mistral (or your proxy)
-- addPlanToCalendar(): writes generated tasks into the built‑in calendar
-- Minimal UI tweaks (planned vs done markers)
-- A new command in chat: any user message will be sent to Mistral using your prompts
-  and the bot will silently add tasks to the calendar (no plan text is sent back)
-
-Assumptions about Mistral response shape (adjust in parseMistralPlan):
-{
-  "habits": [
-    { "name": "Пить воду", "dates": ["2025-10-06","2025-10-07", ...] },
-    { "name": "Зарядка",  "dates": ["2025-10-06","2025-10-08"] }
-  ]
-}
+- Маршрут: любой ввод пользователя в чат -> Mistral -> добавляем план в календарь и текст "сегодня".
+- Ничего не отправляем пользователю в чат (кроме короткого уведомления).
+- Поддерживаем ответы модели с датами ИЛИ без дат (дни/список задач).
+- В календаре плановые дни — контурная точка; выполненные — заливка.
 */
+
 (function(){
-  // 1) === State extensions ===
-  // Ensure each habit has a `plan` array of ISO dates separate from `days` (completed)
+  // === 0) Утилиты
+  const iso = d => { const t=new Date(d.getFullYear(), d.getMonth(), d.getDate()); return t.toISOString().slice(0,10); };
+  const getTodayISO = () => { const t = new Date(); t.setHours(0,0,0,0); return t.toISOString().slice(0,10); };
+
+  // === 1) Расширяем локальное состояние: habits[].plan (даты-план) + habits[].planTasks {date->text}
   function ensurePlanArrays(){
     try{
       const raw = localStorage.getItem('habit_traker_demo_v3');
       if(!raw) return;
       const s = JSON.parse(raw);
-      (s.habits||[]).forEach(h=>{ if(!Array.isArray(h.plan)) h.plan = []; });
+      (s.habits||[]).forEach(h=>{
+        if(!Array.isArray(h.plan)) h.plan = [];
+        if(!h.planTasks || typeof h.planTasks!=='object') h.planTasks = {};
+      });
       localStorage.setItem('habit_traker_demo_v3', JSON.stringify(s));
       if(window.renderAll) window.renderAll();
     }catch(e){}
   }
   ensurePlanArrays();
 
-  // 2) === Calendar visuals: planned vs done ===
-  // Patch existing renderCalendar to show planned days differently (outline) and done days (filled)
-  // This wrapper expects your original renderCalendar to be defined.
-  const _renderCalendar = window.renderCalendar;
-  if(_renderCalendar){
-    window.renderCalendar = function(h, wrapper, ym){
-      // delegate to original to build structure
-      _renderCalendar(h, wrapper, ym);
-      // Then decorate the current month grid we just drew
-      // We target little 8px dot inside each cell; if day is planned but not done -> outline
-      try{
-        const dots = wrapper.querySelectorAll('.cal-grid .cal-cell');
-        const todayISO = new Date(); todayISO.setHours(0,0,0,0);
-        const base = new Date(todayISO.getFullYear(), todayISO.getMonth(), 1);
-        const monthName = wrapper.querySelector('.cal-head .muted')?.textContent||'';
-        // Nothing else to compute here; we simply read the number printed in the cell
-        (dots||[]).forEach(cell=>{
-          const day = cell.querySelector('.day');
-          if(!day) return; // header row
-          const m = new Date(wrapper.querySelector('.cal-head .muted').textContent);
-          // Parse month label via locale is unreliable; rebuild ISO by walking child index
-          // Simpler: infer Y/M from the previous sibling that holds month/year via dataset (we add below)
-        });
-      }catch(e){}
-    };
-  }
-
-  // Alternative: lightly hook cell creation by observing DOM mutations once per draw
-  // and decorating planned cells. This works without replacing your existing code.
-  const iso = d=>{ const t=new Date(d.getFullYear(), d.getMonth(), d.getDate()); return t.toISOString().slice(0,10); };
+  // === 2) Декорирование календаря: план (outline) vs done (fill)
   const observeCalendar = new MutationObserver(()=>{
     try{
       const raw = localStorage.getItem('habit_traker_demo_v3'); if(!raw) return;
       const s = JSON.parse(raw);
-      // For every card/calendar pair, compute its current shown month from the label
+
       document.querySelectorAll('.habit-card').forEach(card=>{
         const name = card.querySelector('.habit-title div:first-child div:first-child')?.textContent?.trim();
         if(!name) return;
+
         const cal = card.querySelector('.calendar:not(.hidden)');
         if(!cal) return;
+
         const label = cal.querySelector('.cal-head .muted');
         const grid  = cal.querySelector('.cal-grid');
         if(!label || !grid) return;
+
         const [monthName, yearStr] = (label.textContent||'').split(/\s+/);
         const ruMonths = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
-        const ruMonths2 = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+        const ruMonths2= ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
         let mIndex = ruMonths.indexOf((monthName||'').toLowerCase());
         if(mIndex<0) mIndex = ruMonths2.indexOf((monthName||'').toLowerCase());
         const Y = parseInt(yearStr,10); if(isNaN(Y) || mIndex<0) return;
+
         const habit = (s.habits||[]).find(h=>h.name===name);
         if(!habit) return;
+
         const planSet = new Set(habit.plan||[]);
         const doneSet = new Set(habit.days||[]);
-        // Walk cells for days 1..31 and mark states
+
         const cells = Array.from(grid.children).filter(el=>el.classList.contains('cal-cell'));
         cells.forEach(cell=>{
           const dEl = cell.querySelector('.day');
-          if(!dEl) return; // skip header row fillers
+          if(!dEl) return;
           const d = parseInt(dEl.textContent,10); if(isNaN(d)) return;
           const key = iso(new Date(Y, mIndex, d));
-          let dot = cell.querySelector('div:nth-child(2)'); // the 8px dot
-          if(!dot){ dot = document.createElement('div'); dot.style.height='8px'; dot.style.width='8px'; dot.style.borderRadius='6px'; dot.style.marginTop='6px'; cell.appendChild(dot); }
+
+          let dot = cell.querySelector('div:nth-child(2)'); // маленькая точка под числом
+          if(!dot){
+            dot = document.createElement('div');
+            dot.style.height='8px';
+            dot.style.width='8px';
+            dot.style.borderRadius='6px';
+            dot.style.marginTop='6px';
+            cell.appendChild(dot);
+          }
           if(doneSet.has(key)){
             cell.classList.add('done');
             dot.style.background='var(--success)';
             dot.style.outline='none';
           } else if(planSet.has(key)){
-            // planned but not done -> outlined dot
             cell.classList.remove('done');
             dot.style.background='transparent';
             dot.style.outline='2px solid var(--accent)';
@@ -2015,29 +1884,65 @@ Assumptions about Mistral response shape (adjust in parseMistralPlan):
   });
   observeCalendar.observe(document.body, {childList:true, subtree:true});
 
-  // 3) === Mistral client ===
-  // Choose ONE mode below: direct or proxied. Proxied is safer (no key in frontend).
+  // === 3) TODAY-секция: выводит текст задания на сегодня под заголовком «Сегодня»
+  function updateTodaySection(){
+    try{
+      const raw = localStorage.getItem('habit_traker_demo_v3'); if(!raw) return;
+      const s = JSON.parse(raw);
+      const today = getTodayISO();
+
+      const todays = [];
+      (s.habits||[]).forEach(h=>{
+        const txt = h.planTasks?.[today];
+        if(txt) todays.push({ name: h.name, text: txt });
+      });
+
+      let targetLabel = document.querySelector('[data-today-label]');
+      if(!targetLabel){
+        const all = Array.from(document.querySelectorAll('div,span,h1,h2,h3,h4,p,li'));
+        targetLabel = all.find(el=>/\bСегодня\b/i.test(el.textContent||''));
+      }
+      if(targetLabel){
+        let container = targetLabel.parentElement?.querySelector('[data-today-tasks]');
+        if(!container){
+          container = document.createElement('div');
+          container.setAttribute('data-today-tasks','');
+          container.style.opacity='0.9';
+          container.style.fontSize='0.9rem';
+          container.style.marginTop='2px';
+          targetLabel.parentElement?.appendChild(container);
+        }
+        if(todays.length){
+          container.innerHTML = todays.map(t=>`<div><span style="opacity:.8">${t.name} — </span>${t.text}</div>`).join('');
+        } else {
+          container.innerHTML = '<div style="opacity:.6">На сегодня заданий нет</div>';
+        }
+      }
+    }catch(e){}
+  }
+  document.addEventListener('DOMContentLoaded', updateTodaySection);
+  const todayObs = new MutationObserver(()=>updateTodaySection());
+  todayObs.observe(document.body,{childList:true,subtree:true});
+  (function scheduleMidnightTick(){
+    const now = new Date();
+    const ms = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0,0,2) - now;
+    setTimeout(()=>{ updateTodaySection(); scheduleMidnightTick(); }, Math.max(ms, 10_000));
+  })();
+
+  // === 4) Клиент для Mistral
   const MISTRAL_MODE = 'proxy'; // 'direct' | 'proxy'
+  const systemPrompt = "Ты помощник по привычкам. Верни ТОЛЬКО JSON. Поддерживаемые форматы: \
+A) schedule[{date,task}] ИЛИ B) days[{day,task}] ИЛИ C) tasks[]. Пример: {\"habits\":[{\"name\":\"Бег\",\"length\":30,\"days\":[{\"day\":1,\"task\":\"3 км\"}]}]}";
 
   async function callMistral(userText){
-    // IMPORTANT: you said prompts already exist. Inject them here.
-    const systemPrompt = "Ты помощник по привычкам. Получи сообщение пользователя и сгенерируй план из дат на ближайшие 4 недели. Верни JSON только в этом формате: {\"habits\":[{\"name\":\"...\",\"dates\":[\"YYYY-MM-DD\", ...]}]} без лишнего текста.";
-
     if(MISTRAL_MODE==='direct'){
-      // Direct call to Mistral API (requires your API key; not recommended in frontend)
-      const apiKey = "PUT_YOUR_KEY_HERE"; // ⚠️ replace or switch to proxy mode
+      const apiKey = "PUT_YOUR_KEY_HERE"; // только для локального теста!
       const res = await fetch('https://api.mistral.ai/v1/chat/completions',{
         method:'POST',
-        headers:{
-          'Content-Type':'application/json',
-          'Authorization':'Bearer '+apiKey
-        },
+        headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+apiKey },
         body: JSON.stringify({
           model: 'mistral-large-latest',
-          messages:[
-            {role:'system', content:systemPrompt},
-            {role:'user', content:userText}
-          ],
+          messages:[ {role:'system',content:systemPrompt}, {role:'user',content:userText} ],
           response_format: { type: 'json_object' }
         })
       });
@@ -2045,7 +1950,6 @@ Assumptions about Mistral response shape (adjust in parseMistralPlan):
       const data = await res.json();
       return data.choices?.[0]?.message?.content || '{}';
     } else {
-      // Proxy mode: implement POST /api/mistral on your backend that forwards to Mistral
       const res = await fetch('/api/mistral',{
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
@@ -2053,84 +1957,114 @@ Assumptions about Mistral response shape (adjust in parseMistralPlan):
       });
       if(!res.ok) throw new Error('Proxy error');
       const data = await res.json();
-      // Expect { content: "{\"habits\":[...] }" }
       return data.content || JSON.stringify(data);
     }
   }
 
+  // === 5) Парсер ответов модели (с датами и без)
   function parseMistralPlan(text){
     try{
       const obj = JSON.parse(text);
-      if(obj && Array.isArray(obj.habits)) return obj.habits.map(h=>({ name: String(h.name||'').trim(), dates: Array.isArray(h.dates)? h.dates.filter(Boolean):[] }));
-    }catch(e){}
-    return [];
+      if(!(obj && Array.isArray(obj.habits))) return [];
+      return obj.habits.map(h=>{
+        const name = String(h.name||'').trim();
+        let schedule = [];
+        if(Array.isArray(h.schedule)){ // A) есть даты
+          schedule = h.schedule.filter(x=>x&&x.date).map(x=>({date:String(x.date), task: x.task? String(x.task):''}));
+          return { name, schedule, length: h.length||schedule.length, noDates:false };
+        }
+        if(Array.isArray(h.days)){     // B) без дат: [{day,task}]
+          schedule = h.days.filter(x=>x&&x.day).map(x=>({ day: parseInt(x.day,10), task: x.task? String(x.task):'' }));
+          return { name, schedule, length: h.length||schedule.length, noDates:true };
+        }
+        if(Array.isArray(h.tasks)){    // C) без дат: ["task1","task2",...]
+          schedule = h.tasks.map((t,idx)=>({ day: idx+1, task: String(t||'') }));
+          return { name, schedule, length: h.length||schedule.length, noDates:true };
+        }
+        return { name, schedule: [], length: 0, noDates:false };
+      });
+    }catch(e){ return []; }
   }
 
-  // 4) === Calendar writing ===
+  // === 6) Запись плана в локальное состояние и обновление UI
   function addPlanToCalendar(plan){
-    // plan = [{name, dates:[ISO]}]
+    // plan = [{name, schedule:[{date,task}] OR [{day,task}], length, noDates?:true}]
     if(!plan || !plan.length) return 0;
     const K='habit_traker_demo_v3';
     const s = JSON.parse(localStorage.getItem(K)||'{}');
     s.habits = s.habits||[];
 
-    function findByName(name){ return s.habits.find(h=> (h.name||'').trim().toLowerCase() === name.trim().toLowerCase()); }
-    function isoDate(d){ const t=new Date(d.getFullYear(), d.getMonth(), d.getDate()); return t.toISOString().slice(0,10); }
+    function findByName(name){ return s.habits.find(h=>(h.name||'').trim().toLowerCase()===name.trim().toLowerCase()); }
+    function toISOFromStart(startISO, offsetDays){
+      const [Y,M,D] = startISO.split('-').map(n=>parseInt(n,10));
+      const d = new Date(Y, M-1, D + offsetDays);
+      return iso(d);
+    }
 
-    let created = 0, updated = 0;
+    let created=0, updated=0;
+    const todayISO = getTodayISO();
+
     plan.forEach(item=>{
-      if(!item || !item.name || !item.dates || !item.dates.length) return;
+      if(!item || !item.name || !item.schedule || !item.schedule.length) return;
       let h = findByName(item.name);
       if(!h){
-        // create habit with empty completion array and targetDays inferred from unique planned dates
-        h = { id:'h'+Math.random().toString(36).slice(2,9), name:item.name, color:'#ffd166', start: isoDate(new Date()), days:[], plan:[] };
+        h = { id:'h'+Math.random().toString(36).slice(2,9), name:item.name, color:'#ffd166', start: todayISO, days:[], plan:[], planTasks:{} };
         s.habits.unshift(h); created++;
       }
       if(!Array.isArray(h.plan)) h.plan = [];
+      if(!h.planTasks || typeof h.planTasks!=='object') h.planTasks = {};
+      if(!h.start) h.start = todayISO;
+
       const set = new Set(h.plan);
-      item.dates.forEach(d => set.add(String(d)));
+
+      if(item.noDates){
+        item.schedule.forEach(({day, task})=>{
+          const idx = parseInt(day,10);
+          if(isNaN(idx) || idx<1) return;
+          const dateISO = toISOFromStart(h.start, idx-1);
+          set.add(dateISO);
+          if(task) h.planTasks[dateISO] = String(task);
+        });
+      } else {
+        item.schedule.forEach(({date, task})=>{
+          if(!date) return; const d = String(date);
+          set.add(d);
+          if(task) h.planTasks[d] = String(task);
+        });
+      }
+
       h.plan = Array.from(set).sort();
-      // if user already marked some days as done, keep those intact
       updated++;
     });
 
     localStorage.setItem(K, JSON.stringify(s));
-    // Ask UI to refresh if functions exist
     if(window.renderAll) window.renderAll();
+    updateTodaySection();
     return created + updated;
   }
 
-  // 5) === Chat hook: route user message -> Mistral -> write calendar ===
-  // We wrap existing send() to insert our flow while keeping old behavior for legacy intents.
+  // === 7) Хук в чат: перехватываем отправку, генерим план, молча пишем в календарь
   const _send = window.send;
   if(_send){
     window.send = async function(){
       const t = (document.getElementById('chat-input')?.value||'').trim();
-      if(!t) return _send(); // fall back
-      // Push your own message first (like before)
-      _send();
+      if(!t) return _send(); // fallback на старое поведение
+      _send(); // покажем пользовательское сообщение как обычно
       try{
-        // 1) Call Mistral with your established prompts
         const raw = await callMistral(t);
         const plan = parseMistralPlan(raw);
-        // 2) Write to calendar – NO plan text back to user
         const n = addPlanToCalendar(plan);
-        // 3) (Optional) brief confirmation
         if(n>0 && window.pushMsg) window.pushMsg('План добавлен в календарь. Успехов!','bot');
-        // Auto switch to habits view so the user sees updated calendars
-        if(window.showView) window.showView('view-habit');
+        if(window.showView) window.showView('view-habit'); // переключим на привычки
       }catch(err){
         console.error(err);
         if(window.pushMsg) window.pushMsg('Не удалось сгенерировать план. Попробуйте ещё раз.','bot');
       }
     };
   }
-
-  // 6) === Optional: mark today as auto-complete if planned and checked ===
-  // If a day is planned and user taps the big check, it already toggles `days`.
-  // No change needed; the calendar overlay will switch from outline to filled dot.
 })();
 </script>
+
 
 </body>
 </html>
