@@ -694,128 +694,26 @@ listRoot.appendChild(card);
     renderProfile();
   }
 
-  // Chat (same simple flow as before)
-  function pushMsg(text, from='you'){
-    const b = document.createElement('div');
-    b.className = from==='you' ? 'bubble you' : 'bubble bot';
-    b.textContent = text;
-    messages.appendChild(b);
-    messages.scrollTop = messages.scrollHeight;
-  }
-  
-  function parseHabitIntent(text){
-    const t = text.trim();
-    // Normalize spaces
-    let clean = t.replace(/\s+/g,' ').trim();
+// --- Minimal chat stub (no legacy bot logic) ---
+function pushMsg(text, from='you'){
+  const b = document.createElement('div');
+  b.className = from === 'you' ? 'bubble you' : 'bubble bot';
+  b.textContent = text;
+  messages.appendChild(b);
+  messages.scrollTop = messages.scrollHeight;
+}
 
-    // Extract number of days (1..365)
-    const numMatch = clean.match(/(\d{1,3})/);
-    const days = numMatch ? Math.max(1, Math.min(365, parseInt(numMatch[1],10))) : null;
+function send(){
+  const t = (chatInput?.value || '').trim();
+  if(!t) return;
+  pushMsg(t, 'you');
+  chatInput.value = '';
+  // Никакой старой логики тут нет — дальше подключится патч Mistral (он перехватывает window.send)
+}
 
-    // Remove helper words and the number to isolate a probable name
-    let name = clean
-      .replace(/^(добав(ь|и)|добавить|создай|создать|прибавь|сделай)\s*/i,'')
-      .replace(/\bна\s+\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
-      .replace(/\b\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
-      .replace(/\bдн(я|ей)?\b/gi,'')
-      .replace(/\bдень\b/gi,'')
-      .replace(/\s+/g,' ').trim();
+sendBtn?.addEventListener('click', send);
+chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
 
-    // If message looks like a habit name (2..40 chars) and not only filler words
-    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(name || '') && !/дн|дней|day|days/i.test(name || '');
-
-    if(looksLikeName){
-      return { name, days };
-    }
-    // If the whole text looks like a name (without cleaning)
-    const asName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(clean) && !/дн|дней|day|days/i.test(clean);
-    if(asName){
-      return { name: clean, days };
-    }
-    return null;
-  }
-
-  function botReply(q){
-    const text = q.trim();
-
-    // If we're waiting for duration, prioritize that flow
-    if(state.pending && state.pending.type==='duration' && state.pending.habitId){
-      const num = (text.match(/(\d{1,3})/)||[])[1];
-      if(num){
-        const n = Math.max(1, Math.min(365, parseInt(num,10)));
-        const h = state.habits.find(x=>x.id===state.pending.habitId);
-        if(h){ h.targetDays = n; saveState(state); renderAll(); }
-        pushMsg(`Отлично, ставлю срок: ${n} дней.`, 'bot');
-        state.pending = null; saveState(state);
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg('Напиши число дней, например: 30', 'bot');
-        return;
-      }
-    }
-
-    // New: try to parse full intent from a single message
-    const parsed = parseHabitIntent(text);
-    if(parsed && parsed.name){
-      const h = createHabit(parsed.name);
-      if(parsed.days){
-        h.targetDays = parsed.days;
-        saveState(state); renderAll();
-        pushMsg(`Добавил: «${h.name}» на ${parsed.days} дней. Удачи!`, 'bot');
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-        state.pending = { type:'duration', habitId: h.id }; saveState(state);
-        return;
-      }
-    }
-
-    // Legacy flows below kept for compatibility
-    if(state.pending && state.pending.type==='name'){
-      const name = text.replace(/^привыч(ка|ку)?\s*/i, '').trim() || 'Новая привычка';
-      const h = createHabit(name);
-      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-      state.pending = { type:'duration', habitId: h.id }; saveState(state);
-      return;
-    }
-
-    const numInline = (text.match(/(\d{1,3})/)||[])[1];
-    if(numInline){
-      const h = state.habits[0];
-      if(h){
-        const n = Math.max(1, Math.min(365, parseInt(numInline,10)));
-        h.targetDays = n; saveState(state); renderAll();
-        pushMsg(`Ок, срок для «${h.name}»: ${n} дней.`, 'bot');
-        return;
-      }
-    }
-
-    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(text) && !/дн|дней|day|days/i.test(text);
-    if(looksLikeName){
-      const h = createHabit(text);
-      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-      state.pending = { type:'duration', habitId: h.id }; saveState(state);
-      return;
-    }
-
-    if(!state.habits || state.habits.length===0){
-      pushMsg('Что добавить в привычки? Просто напиши короткое название, например: «Пить воду».', 'bot');
-      state.pending = { type:'name' }; saveState(state);
-    } else {
-      pushMsg('Напиши название привычки, которую добавить. Можно сразу указать срок: «Пить воду 30».', 'bot');
-      state.pending = { type:'name' }; saveState(state);
-    }
-  }
-
-  function send(){
-    const t = (chatInput?.value||'').trim();
-    if(!t) return;
-    pushMsg(t, 'you'); chatInput.value=''; botReply(t);
-  }
-  sendBtn?.addEventListener('click', send);
-  chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
 
 
   // Avatar upload handler
@@ -862,14 +760,7 @@ listRoot.appendChild(card);
     }
   }catch(e){}
 
-  try{
-    const welcomedKey = 'habit_welcome_shown';
-    const was = sessionStorage.getItem(welcomedKey);
-    if(!was){
-      pushMsg('Привет! Напиши короткое название привычки — я добавлю её и спрошу срок (в днях).', 'bot');
-      sessionStorage.setItem(welcomedKey, '1');
-    }
-  }catch(e){}
+ 
 
   // Debug badge
   try{
