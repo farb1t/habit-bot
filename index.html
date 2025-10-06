@@ -1887,6 +1887,72 @@ document.addEventListener('DOMContentLoaded', function(){
 })();
 </script>
 
+<script>
+(function(){
+  const API = 'https://habbitserver.konayevna.workers.dev/chat';
+
+  const messagesEl = document.getElementById('messages');
+  const oldBtn = document.getElementById('send-btn');
+  const oldInput = document.getElementById('chat-input');
+
+  // 🔧 Снести ВСЕ старые обработчики: клонируем ноды и заменяем
+  const sendBtn = oldBtn.cloneNode(true);
+  oldBtn.parentNode.replaceChild(sendBtn, oldBtn);
+  const inputEl = oldInput.cloneNode(true);
+  oldInput.parentNode.replaceChild(inputEl, oldInput);
+
+  function addMsg(txt, who='bot'){
+    const b = document.createElement('div');
+    b.className = who === 'you' ? 'bubble you' : 'bubble bot';
+    b.textContent = txt;
+    messagesEl.appendChild(b);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  async function callAPI(text){
+    const resp = await fetch(API, {
+      method: 'POST',
+      headers: {'content-type':'application/json'},
+      body: JSON.stringify({
+        stream: false, // включишь true, если захочешь стрим
+        messages: [{ role:'user', content: text }]
+      })
+    });
+    if (resp.ok && resp.headers.get('content-type')?.includes('application/json')) {
+      const json = await resp.json();
+      return json?.choices?.[0]?.message?.content || 'Пустой ответ';
+    } else if (resp.ok && resp.headers.get('content-type')?.includes('text/event-stream')) {
+      // если включишь stream:true — сюда добавим парсер SSE
+      return 'Стрим включён, но парсер отключён';
+    } else {
+      return 'Ошибка: ' + resp.status + ' ' + (await resp.text()).slice(0,200);
+    }
+  }
+
+  async function send(){
+    const text = (inputEl.value||'').trim();
+    if (!text) return;
+    addMsg(text, 'you');
+    inputEl.value = '';
+
+    try{
+      const reply = await callAPI(text);
+      addMsg(reply, 'bot');
+    }catch(e){
+      addMsg('Сеть/сервер: ' + (e?.message||e), 'bot');
+    }
+  }
+
+  // Привязка НОВЫХ слушателей
+  sendBtn.addEventListener('click', send);
+  inputEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
+
+  // На всякий случай отладка
+  console.log('Worker API →', API);
+})();
+</script>
+
+
 
 
 </body>
