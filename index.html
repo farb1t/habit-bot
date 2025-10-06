@@ -1308,7 +1308,7 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
     const t = c.querySelector('.series-text') || document.querySelector('.txt');
     const v = (s.profile?.streak) || 0;
     if (t) t.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
-
+  }   
 
   document.addEventListener('click',function(e){
     const today=!!e.target.closest('.today-check,.check');
