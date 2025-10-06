@@ -1952,28 +1952,7 @@ document.addEventListener('DOMContentLoaded', function(){
 })();
 </script>
 
-<script>
-document.addEventListener('DOMContentLoaded', async () => {
-  // контейнер для сообщений
-  const messagesEl = document.getElementById('messages');
-  if (!messagesEl) return;
 
-  // функция добавления "пузыря"
-  function addMsg(txt, who='bot') {
-    const b = document.createElement('div');
-    b.className = who === 'you' ? 'bubble you' : 'bubble bot';
-    b.textContent = txt;
-    messagesEl.appendChild(b);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  }
-
-  // Показываем приветствие только один раз
-  if (!localStorage.getItem('habit_bot_greeted')) {
-    addMsg('👋 Привет! Я помогу создать полезную привычку. Расскажи, какую хочешь внедрить? (цель должна быть измеримой)', 'bot');
-    localStorage.setItem('habit_bot_greeted', '1');
-  }
-});
-</script>
 
 
 
