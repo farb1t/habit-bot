@@ -1294,8 +1294,10 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
   }
   function updateChip(){
     const s=getState()||{}; const c=document.getElementById('series-chip-gold'); if(!c) return;
-    const t=c.querySelector('.series-text') || querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
-  }
+    const t = c.querySelector('.series-text') || document.querySelector('.txt');
+    const v = (s.profile?.streak) || 0;
+    if (t) t.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
+
 
   document.addEventListener('click',function(e){
     const today=!!e.target.closest('.today-check,.check');
@@ -1394,7 +1396,7 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
     const s = getState() || {};
     const v = (s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
     if(chip){
-      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || querySelector('.txt');
+      let txt = chip.querySelector('.series-text') || document.querySelector('.txt');
       if(txt){ txt.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']); }
     }
   }
