@@ -1364,8 +1364,13 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
     }, today?140:70);
   }, {capture:true, passive:true});
 
-  document.addEventListener('DOMContentLoaded', function(){ ensureChip(); updateChip(); });
-})();
+  document.addEventListener('DOMContentLoaded', function(){ 
+  ensureChip(); 
+  updateChip(); 
+});         // ← закрыли addEventListener
+
+})();       // ← закрыли IIFE
+
 </script>
 <!-- === /PATCH === -->
 
