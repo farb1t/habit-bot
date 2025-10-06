@@ -1810,30 +1810,38 @@ document.addEventListener('DOMContentLoaded', function(){
 
 
 <script>
-(function(){
-  // 🔹 URL твоего Cloudflare Worker
+document.addEventListener('DOMContentLoaded', () => {
   const API = 'https://habbitserver.konayevna.workers.dev/chat';
 
   const messagesEl = document.getElementById('messages');
-  const inputEl = document.getElementById('chat-input');
-  const sendBtn = document.getElementById('send-btn');
+  const inputEl    = document.getElementById('chat-input');
+  const sendBtn    = document.getElementById('send-btn');
 
-  // Храним историю чата, чтобы бот не забывал контекст
+  if (!messagesEl || !inputEl || !sendBtn) {
+    console.warn('chat elements not found');
+    return;
+  }
+
+  // если кнопка внутри <form> — блокируем нативный submit
+  const form = sendBtn.closest('form') || inputEl.closest('form');
+  if (form) form.addEventListener('submit', e => { e.preventDefault(); send(); });
+  if (sendBtn.type !== 'button') sendBtn.type = 'button';
+
   const HISTORY_KEY = 'habit_bot_chat_history_v1';
   let history = [];
   try { history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch {}
-  function persist(){ localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
+  const persist = () => localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
 
-  // Добавление пузырей в чат
   function addMsg(txt, who='bot'){
     const b = document.createElement('div');
     b.className = who === 'you' ? 'bubble you' : 'bubble bot';
     b.textContent = txt;
     messagesEl.appendChild(b);
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    return b;
   }
 
-  // Если чат пуст — вывести приветствие один раз
+  // приветствие один раз
   if (!history.length) {
     addMsg('👋 Привет! Помогу создать привычку. Напиши измеримую цель (например: "пить 2 литра воды в день").', 'bot');
   }
@@ -1842,26 +1850,21 @@ document.addEventListener('DOMContentLoaded', function(){
     const text = (inputEl.value || '').trim();
     if (!text) return;
 
-    // Отобразим текст пользователя
     addMsg(text, 'you');
     inputEl.value = '';
 
-    // Добавляем в историю
-    history.push({ role:'user', content:text });
-    persist();
+    history.push({ role:'user', content:text }); persist();
 
     try {
       const resp = await fetch(API, {
         method: 'POST',
-        headers: {'content-type':'application/json'},
-        body: JSON.stringify({
-          stream: false,  // можно включить stream:true, если хочешь SSE
-          messages: history
-        })
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ stream:false, messages: history })
       });
 
       if (!resp.ok) {
-        addMsg('Ошибка: ' + resp.status + ' ' + await resp.text(), 'bot');
+        const t = await resp.text();
+        addMsg('Ошибка: ' + resp.status + ' ' + t.slice(0,200), 'bot');
         return;
       }
 
@@ -1869,10 +1872,7 @@ document.addEventListener('DOMContentLoaded', function(){
       const answer = data?.choices?.[0]?.message?.content || data?.message || 'Нет ответа 😔';
       addMsg(answer, 'bot');
 
-      // Сохраняем ответ ассистента
-      history.push({ role:'assistant', content: answer });
-      persist();
-
+      history.push({ role:'assistant', content: answer }); persist();
     } catch(e) {
       addMsg('Сбой соединения: ' + (e.message || e), 'bot');
     }
@@ -1880,33 +1880,12 @@ document.addEventListener('DOMContentLoaded', function(){
 
   sendBtn.addEventListener('click', send);
   inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
-})();
-</script>
-
-
-
-<script>
-document.addEventListener('DOMContentLoaded', async () => {
-  // контейнер для сообщений
-  const messagesEl = document.getElementById('messages');
-  if (!messagesEl) return;
-
-  // функция добавления "пузыря"
-  function addMsg(txt, who='bot') {
-    const b = document.createElement('div');
-    b.className = who === 'you' ? 'bubble you' : 'bubble bot';
-    b.textContent = txt;
-    messagesEl.appendChild(b);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  }
-
-  // Показываем приветствие только один раз
-  if (!localStorage.getItem('habit_bot_greeted')) {
-    addMsg('👋 Привет! Я помогу создать полезную привычку. Расскажи, какую хочешь внедрить? (цель должна быть измеримой)', 'bot');
-    localStorage.setItem('habit_bot_greeted', '1');
-  }
 });
 </script>
+
+
+
+
 
 
 
