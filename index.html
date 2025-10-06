@@ -71,6 +71,17 @@
   }
 </style>
 <script>
+(function (w, d) {
+  if (typeof w.querySelector !== 'function') {
+    w.querySelector = d.querySelector.bind(d);
+  }
+  if (typeof w.querySelectorAll !== 'function') {
+    w.querySelectorAll = d.querySelectorAll.bind(d);
+  }
+})(window, document);
+</script>
+
+<script>
   // 100dvh fix for iOS Safari: update --vh on resize/orientation
   (function(){
     function setVH(){
