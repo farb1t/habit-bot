@@ -1810,16 +1810,21 @@ document.addEventListener('DOMContentLoaded', function(){
 
 
 <script>
-(async function(){
-  // 🔹 Укажи URL своего Cloudflare Worker:
+(function(){
+  // 🔹 URL твоего Cloudflare Worker
   const API = 'https://habbitserver.konayevna.workers.dev/chat';
-  // если используешь свой домен:
-  // const API = 'https://api.mydomain.com/chat';
 
   const messagesEl = document.getElementById('messages');
   const inputEl = document.getElementById('chat-input');
   const sendBtn = document.getElementById('send-btn');
 
+  // Храним историю чата, чтобы бот не забывал контекст
+  const HISTORY_KEY = 'habit_bot_chat_history_v1';
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch {}
+  function persist(){ localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
+
+  // Добавление пузырей в чат
   function addMsg(txt, who='bot'){
     const b = document.createElement('div');
     b.className = who === 'you' ? 'bubble you' : 'bubble bot';
@@ -1828,129 +1833,56 @@ document.addEventListener('DOMContentLoaded', function(){
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  async function streamResponse(resp){
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let acc = '', started = false;
-    while (true) {
-      const {value, done} = await reader.read();
-      if (done) break;
-      acc += dec.decode(value, {stream:true});
-      const parts = acc.split('\n\n');
-      acc = parts.pop() || '';
-      for (const chunk of parts) {
-        if (!chunk.startsWith('data:')) continue;
-        const data = chunk.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const json = JSON.parse(data);
-          const delta = json?.choices?.[0]?.delta?.content || '';
-          if (delta) {
-            if (!started) {
-              addMsg('', 'bot');
-              started = true;
-            }
-            const last = messagesEl.querySelectorAll('.bubble.bot:last-child')[0];
-            last.textContent += delta;
-          }
-        } catch(e){}
-      }
-    }
-  }
-
-  window.send = async function(){
-    const text = (inputEl.value || '').trim();
-    if (!text) return;
-    addMsg(text, 'you');
-    inputEl.value = '';
-
-    const resp = await fetch(API, {
-      method: 'POST',
-      headers: {'content-type':'application/json'},
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: text }],
-        stream: true
-      })
-    });
-
-    if (resp.headers.get('content-type')?.includes('text/event-stream')) {
-      await streamResponse(resp);
-    } else {
-      const json = await resp.json();
-      const msg = json?.choices?.[0]?.message?.content || 'Ошибка ответа';
-      addMsg(msg, 'bot');
-    }
-  };
-
-  sendBtn.addEventListener('click', () => window.send());
-  inputEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') window.send(); });
-})();
-</script>
-
-<script>
-(function(){
-  const API = 'https://habbitserver.konayevna.workers.dev/chat';
-
-  const messagesEl = document.getElementById('messages');
-  const oldBtn = document.getElementById('send-btn');
-  const oldInput = document.getElementById('chat-input');
-
-  // 🔧 Снести ВСЕ старые обработчики: клонируем ноды и заменяем
-  const sendBtn = oldBtn.cloneNode(true);
-  oldBtn.parentNode.replaceChild(sendBtn, oldBtn);
-  const inputEl = oldInput.cloneNode(true);
-  oldInput.parentNode.replaceChild(inputEl, oldInput);
-
-  function addMsg(txt, who='bot'){
-    const b = document.createElement('div');
-    b.className = who === 'you' ? 'bubble you' : 'bubble bot';
-    b.textContent = txt;
-    messagesEl.appendChild(b);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  }
-
-  async function callAPI(text){
-    const resp = await fetch(API, {
-      method: 'POST',
-      headers: {'content-type':'application/json'},
-      body: JSON.stringify({
-        stream: false, // включишь true, если захочешь стрим
-        messages: [{ role:'user', content: text }]
-      })
-    });
-    if (resp.ok && resp.headers.get('content-type')?.includes('application/json')) {
-      const json = await resp.json();
-      return json?.choices?.[0]?.message?.content || 'Пустой ответ';
-    } else if (resp.ok && resp.headers.get('content-type')?.includes('text/event-stream')) {
-      // если включишь stream:true — сюда добавим парсер SSE
-      return 'Стрим включён, но парсер отключён';
-    } else {
-      return 'Ошибка: ' + resp.status + ' ' + (await resp.text()).slice(0,200);
-    }
+  // Если чат пуст — вывести приветствие один раз
+  if (!history.length) {
+    addMsg('👋 Привет! Помогу создать привычку. Напиши измеримую цель (например: "пить 2 литра воды в день").', 'bot');
   }
 
   async function send(){
-    const text = (inputEl.value||'').trim();
+    const text = (inputEl.value || '').trim();
     if (!text) return;
+
+    // Отобразим текст пользователя
     addMsg(text, 'you');
     inputEl.value = '';
 
-    try{
-      const reply = await callAPI(text);
-      addMsg(reply, 'bot');
-    }catch(e){
-      addMsg('Сеть/сервер: ' + (e?.message||e), 'bot');
+    // Добавляем в историю
+    history.push({ role:'user', content:text });
+    persist();
+
+    try {
+      const resp = await fetch(API, {
+        method: 'POST',
+        headers: {'content-type':'application/json'},
+        body: JSON.stringify({
+          stream: false,  // можно включить stream:true, если хочешь SSE
+          messages: history
+        })
+      });
+
+      if (!resp.ok) {
+        addMsg('Ошибка: ' + resp.status + ' ' + await resp.text(), 'bot');
+        return;
+      }
+
+      const data = await resp.json().catch(()=>null);
+      const answer = data?.choices?.[0]?.message?.content || data?.message || 'Нет ответа 😔';
+      addMsg(answer, 'bot');
+
+      // Сохраняем ответ ассистента
+      history.push({ role:'assistant', content: answer });
+      persist();
+
+    } catch(e) {
+      addMsg('Сбой соединения: ' + (e.message || e), 'bot');
     }
   }
 
-  // Привязка НОВЫХ слушателей
   sendBtn.addEventListener('click', send);
-  inputEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
-
-  // На всякий случай отладка
-  console.log('Worker API →', API);
+  inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 })();
 </script>
+
 
 
 <script>
