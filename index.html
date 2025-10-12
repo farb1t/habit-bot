@@ -400,13 +400,27 @@ body.kb-open nav.bottom{
     }catch(e){ return JSON.parse(JSON.stringify(defaultState)); }
   }
 // --- Safe shims for accidental global querySelector/querySelectorAll usage ---
-  if (typeof window.querySelector !== 'function') {
-    window.querySelector = (sel, root) => (root || document).querySelector(sel);
+(function(){
+  const _qs  = (sel, root) => (root || document).querySelector(sel);
+  const _qsa = (sel, root) => (root || document).querySelectorAll(sel);
+
+  // 1) Добавляем свойства окна (на случай window.querySelector)
+  if (typeof window.querySelector !== 'function')   window.querySelector   = _qs;
+  if (typeof window.querySelectorAll !== 'function') window.querySelectorAll = _qsa;
+
+  // 2) Объявляем глобальные переменные (на случай вызова без document.)
+  try { void querySelector; }    
+  catch(e){ 
+    window.querySelector = _qs; 
+    (0,eval)('var querySelector = window.querySelector;'); 
   }
-  if (typeof window.querySelectorAll !== 'function') {
-    window.querySelectorAll = (sel, root) => (root || document).querySelectorAll(sel);
+  try { void querySelectorAll; } 
+  catch(e){ 
+    window.querySelectorAll = _qsa; 
+    (0,eval)('var querySelectorAll = window.querySelectorAll;'); 
   }
-// теперь любые вызовы querySelector('.x') не упадут
+})();
+
 
   // DOM
   const views = Array.from(document.querySelectorAll('.view'));
@@ -794,9 +808,16 @@ async function talkToApi() {
     const data = await res.json();
 
     // Показать ВСЕ сообщения ассистента (все промежуточные реплики до готовности плана)
-    if (Array.isArray(data.assistant_messages)) {
-      for (const msg of data.assistant_messages) pushMsg(msg, 'bot');
+if (Array.isArray(data.assistant_messages)) {
+  // не повторяем дословно последний бот-месседж
+  const lastBot = [...(state.chat||[])].reverse().find(m => m.role === 'assistant');
+  for (const msg of data.assistant_messages) {
+    if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
+      pushMsg(msg, 'bot');
     }
+  }
+}
+
 
     // Если модель извлекла имя/срок — сделаем/обновим текущую привычку
     if (data.extracted) {
