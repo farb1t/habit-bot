@@ -802,42 +802,41 @@ async function talkToApi() {
     const data = await res.json();
 
         // ===== DEBUG: всегда логируем ответ сервера в консоль =====
-    console.log('[API /chat] response:', data);
+console.log('[API /chat] response:', data);
 
-    // Нормализуем неожиданную форму (если сервер вернул строку или завернул в choices)
-    let norm = data;
-    if (typeof norm === 'string') {
-      try { norm = JSON.parse(norm); } catch {}
-    }
-    if (norm && norm.choices && norm.choices[0]?.message?.content) {
-      try { norm = JSON.parse(norm.choices[0].message.content); } catch {}
-    }
+// Нормализация форматов (на случай строк/choices)
+let norm = data;
+if (typeof norm === 'string') {
+  try { norm = JSON.parse(norm); } catch {}
+}
+if (norm && norm.choices && norm.choices[0]?.message?.content) {
+  try { norm = JSON.parse(norm.choices[0].message.content); } catch {}
+}
 
-    // 1) Показать ВСЕ сообщения ассистента (все промежуточные реплики до готовности плана)
-    const msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages : [];
-    if (msgs.length) {
-      // не повторяем дословно последний бот-месседж
-      const lastBot = [...(state.chat||[])].reverse().find(m => m.role === 'assistant');
-      for (const msg of msgs) {
-        if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
-          pushMsg(msg, 'bot');
-        }
-      }
-    } else if (norm?.status === 'asking') {
-      // Фоллбек, если ассистент ничего не прислал, но статус "asking"
-      pushMsg('Не расслышала. Напиши привычку в измеримых единицах и срок (в днях).', 'bot');
+// 1) Показать ВСЕ ассистентские сообщения (промежуточные)
+const msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages : [];
+if (msgs.length) {
+  const lastBot = [...(state.chat || [])].reverse().find(m => m.role === 'assistant');
+  for (const msg of msgs) {
+    if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
+      pushMsg(msg, 'bot');
     }
+  }
+} else if (norm?.status === 'asking') {
+  pushMsg('Не расслышала. Напиши привычку в измеримых единицах и срок (в днях).', 'bot');
+}
 
-    // 2) Если извлечённые данные пришли — создаём/обновляем текущую привычку
-    if (norm?.extracted) {
-      const h = ensureCurrentHabitFromExtracted(norm.extracted);
-      if (h && Number.isFinite(norm.extracted.duration_days)) {
-        h.targetDays = Math.max(1, Math.min(365, norm.extracted.duration_days|0));
-        saveState(state); renderAll();
-      }
-    }
+// 2) Если извлечённые данные пришли — создать/обновить текущую привычку
+if (norm?.extracted) {
+  const h = ensureCurrentHabitFromExtracted(norm.extracted);
+  if (h && Number.isFinite(norm.extracted.duration_days)) {
+    h.targetDays = Math.max(1, Math.min(365, norm.extracted.duration_days | 0));
+    saveState(state);
+    renderAll();
+  }
+}
 
-    // 3) Если план готов — сохраняем в привычку, НО в чат не показываем
+// 3) Если план готов — сохранить в привычку (в чат НЕ выводим)
 if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
   let h = state.currentHabitId ? state.habits.find(x => x.id === state.currentHabitId) : null;
   if (!h) h = ensureCurrentHabitFromExtracted(norm.extracted || {});
@@ -860,15 +859,17 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
   renderAll();
 
   // короткое уведомление, если сервер его не прислал
-  if (!msgs.length) pushMsg('План готов — добавлю его в календарь. Хочешь советы по закреплению?', 'bot');
+  if (!msgs.length) {
+    pushMsg('План готов — добавлю его в календарь. Хочешь советы по закреплению?', 'bot');
+  }
 }
 
+// 4) Если сервер вернул ошибку
+if (norm?.error) {
+  pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
+  console.warn('API error:', norm);
+}
 
-    // 4) Если сервер вернул ошибку
-    if (norm?.error) {
-      pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
-      console.warn('API error:', norm);
-    }
  catch (e) {
     console.error(e);
     pushMsg('Что-то пошло не так. Попробуем ещё раз?', 'bot');
@@ -1581,6 +1582,10 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
     const s=getState()||{}; const c=document.getElementById('series-chip-gold'); if(!c) return;
     const t=c.querySelector('.series-text') || document.querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
   }
+  // === Алиасы для совместимости со старым кодом ===
+  window.updateGoldChipText = updateChip;
+  window.updateGoldChipRect = ensureChip;
+
 
   document.addEventListener('click',function(e){
     const today=!!e.target.closest('.today-check,.check');
