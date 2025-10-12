@@ -399,6 +399,14 @@ body.kb-open nav.bottom{
       return s;
     }catch(e){ return JSON.parse(JSON.stringify(defaultState)); }
   }
+// --- Safe shims for accidental global querySelector/querySelectorAll usage ---
+  if (typeof window.querySelector !== 'function') {
+    window.querySelector = (sel, root) => (root || document).querySelector(sel);
+  }
+  if (typeof window.querySelectorAll !== 'function') {
+    window.querySelectorAll = (sel, root) => (root || document).querySelectorAll(sel);
+  }
+// теперь любые вызовы querySelector('.x') не упадут
 
   // DOM
   const views = Array.from(document.querySelectorAll('.view'));
@@ -760,7 +768,10 @@ function ensureCurrentHabitFromExtracted(extracted) {
     return state.habits.find(h => h.id === state.currentHabitId) || null;
   }
   // ищем по имени
-  const byName = state.habits.find(h => h.name.toLowerCase() === extracted.habit.toLowerCase());
+  const byName = state.habits.find(
+    h => h.name.toLowerCase() === extracted.habit.toLowerCase()
+  );
+
   if (byName) { state.currentHabitId = byName.id; saveState(state); return byName; }
   // создаём новую
   const h = createHabit(extracted.habit);
