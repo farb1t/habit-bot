@@ -788,13 +788,14 @@ function ensureCurrentHabitFromExtracted(extracted) {
 
   if (byName) { state.currentHabitId = byName.id; saveState(state); return byName; }
   // создаём новую
-  const h = createHabit(extracted.habit);
-  // если у модели указан срок — сохраним
-  if (Number.isFinite(extracted.duration_days)) {
-    h.targetDays = Math.max(1, Math.min(365, extracted.duration_days|0));
-    saveState(state); renderAll();
-  }
-  return h;
+ const h = createHabit(extracted.habit);
+state.currentHabitId = h.id;      // ← добавь эту строку
+if (Number.isFinite(extracted.duration_days)) {
+  h.targetDays = Math.max(1, Math.min(365, extracted.duration_days | 0));
+  saveState(state);
+  renderAll();
+}
+return h;
 }
 
 // Основной вызов
@@ -807,40 +808,75 @@ async function talkToApi() {
     });
     const data = await res.json();
 
-    // Показать ВСЕ сообщения ассистента (все промежуточные реплики до готовности плана)
-if (Array.isArray(data.assistant_messages)) {
-  // не повторяем дословно последний бот-месседж
-  const lastBot = [...(state.chat||[])].reverse().find(m => m.role === 'assistant');
-  for (const msg of data.assistant_messages) {
-    if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
-      pushMsg(msg, 'bot');
+        // ===== DEBUG: всегда логируем ответ сервера в консоль =====
+    console.log('[API /chat] response:', data);
+
+    // Нормализуем неожиданную форму (если сервер вернул строку или завернул в choices)
+    let norm = data;
+    if (typeof norm === 'string') {
+      try { norm = JSON.parse(norm); } catch {}
     }
+    if (norm && norm.choices && norm.choices[0]?.message?.content) {
+      try { norm = JSON.parse(norm.choices[0].message.content); } catch {}
+    }
+
+    // 1) Показать ВСЕ сообщения ассистента (все промежуточные реплики до готовности плана)
+    const msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages : [];
+    if (msgs.length) {
+      // не повторяем дословно последний бот-месседж
+      const lastBot = [...(state.chat||[])].reverse().find(m => m.role === 'assistant');
+      for (const msg of msgs) {
+        if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
+          pushMsg(msg, 'bot');
+        }
+      }
+    } else if (norm?.status === 'asking') {
+      // Фоллбек, если ассистент ничего не прислал, но статус "asking"
+      pushMsg('Не расслышала. Напиши привычку в измеримых единицах и срок (в днях).', 'bot');
+    }
+
+    // 2) Если извлечённые данные пришли — создаём/обновляем текущую привычку
+    if (norm?.extracted) {
+      const h = ensureCurrentHabitFromExtracted(norm.extracted);
+      if (h && Number.isFinite(norm.extracted.duration_days)) {
+        h.targetDays = Math.max(1, Math.min(365, norm.extracted.duration_days|0));
+        saveState(state); renderAll();
+      }
+    }
+
+    // 3) Если план готов — сохраняем в привычку, НО в чат не показываем
+if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
+  let h = state.currentHabitId ? state.habits.find(x => x.id === state.currentHabitId) : null;
+  if (!h) h = ensureCurrentHabitFromExtracted(norm.extracted || {});
+  if (!h) {
+    // фоллбек: создаём пустую привычку и делаем её текущей
+    h = createHabit('Новая привычка');
+    state.currentHabitId = h.id;
   }
+
+  h.plan = norm.plan
+    .map(it => ({
+      day: Number.isFinite(it?.day) ? (it.day | 0) : 0,
+      text: String(it?.text || '').slice(0, 160)
+    }))
+    .filter(p => p.text);
+
+  h.planGeneratedAt = Date.now();
+  if (!Number.isFinite(h.targetDays)) h.targetDays = h.plan.length;
+  saveState(state);
+  renderAll();
+
+  // короткое уведомление, если сервер его не прислал
+  if (!msgs.length) pushMsg('План готов — добавлю его в календарь. Хочешь советы по закреплению?', 'bot');
 }
 
 
-    // Если модель извлекла имя/срок — сделаем/обновим текущую привычку
-    if (data.extracted) {
-      const h = ensureCurrentHabitFromExtracted(data.extracted);
-      if (h && Number.isFinite(data.extracted.duration_days)) {
-        h.targetDays = Math.max(1, Math.min(365, data.extracted.duration_days|0));
-        saveState(state); renderAll();
-      }
+    // 4) Если сервер вернул ошибку
+    if (norm?.error) {
+      pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
+      console.warn('API error:', norm);
     }
-
-    // Если план готов — кладём в привычку, НО в чат не показываем
-    if (data.status === 'ready' && Array.isArray(data.plan) && data.plan.length) {
-      // если вдруг не выбрана привычка — создадим из extracted
-      let h = state.currentHabitId ? state.habits.find(x=>x.id===state.currentHabitId) : null;
-      if (!h) h = ensureCurrentHabitFromExtracted(data.extracted || {});
-      if (h) {
-        h.plan = data.plan.map(it => ({ day: it.day, text: it.text }));
-        h.planGeneratedAt = Date.now();
-        if (!Number.isFinite(h.targetDays)) h.targetDays = data.plan.length;
-        saveState(state); renderAll();
-      }
-    }
-  } catch (e) {
+ catch (e) {
     console.error(e);
     pushMsg('Что-то пошло не так. Попробуем ещё раз?', 'bot');
   }
