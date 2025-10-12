@@ -383,8 +383,11 @@ body.kb-open nav.bottom{
     profile: {name:'Гость', avatar: '', streak:0},
     habits: [],
     trash: [],
-    currentHabitId: null
+    currentHabitId: null,
+    chat: [],          // 👈 история чата для API
+    __welcomed: false  // 👈 показано ли приветствие
   };
+
 
   function saveState(s){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }catch(e){} }
   function loadState(){
@@ -419,6 +422,17 @@ body.kb-open nav.bottom{
 
   let state = loadState();
   if(!('pending' in state)) state.pending = null;
+
+  // Показать приветствие один раз при первом запуске
+  if (!state.__welcomed) {
+    pushMsg(
+      'Привет! Я помогу создать привычку. Напиши цель в измеримых единицах (например: «пить 2000 мл воды в день») и срок (минимум 30 дней). Я задам пару уточнений — и добавлю план в календарь.',
+      'bot'
+    );
+    state.__welcomed = true;
+    saveState(state);
+  }
+
 
   const COLOR_PALETTE = ['#ff6b3d', '#ff3b30', '#59e391', '#4da3ff', '#c792ea', '#ffd166', '#06d6a0', '#f469a9'];
   function uid(){ return 'h' + Math.random().toString(36).slice(2,9); }
@@ -481,6 +495,15 @@ body.kb-open nav.bottom{
         const dot=document.createElement('div'); dot.style.height='8px'; dot.style.width='8px'; dot.style.borderRadius='6px'; dot.style.marginTop='6px';
         if(h.days.includes(dateStr)){ cell.classList.add('done'); dot.style.background='var(--success)'; } else { dot.style.background='transparent'; }
         cell.appendChild(dot);
+        // Показываем задание в title только для прошедших дат и для сегодня
+        const todayIso = isoDate(new Date());
+        const idxFromStart = daysBetween(h.start, dateStr) - 1; // 0-based
+        const isFuture = (new Date(dateStr) > new Date(todayIso));
+        if (!isFuture && h.plan && h.plan[idxFromStart]) {
+          const text = h.plan[idxFromStart].text || h.plan[idxFromStart];
+          if (text) cell.title = text;
+        }
+
         if(dateStr === todayKey){
           cell.style.cursor='pointer'; cell.title='Отметить выполнение за сегодня';
           cell.addEventListener('click', ()=>{
@@ -664,8 +687,20 @@ const check = document.createElement('div'); check.className='check today-check'
         saveState(state); renderAll();
       });
       const ti = document.createElement('div'); ti.className='task-info';
-      const tt = document.createElement('div'); tt.style.fontWeight='700'; tt.textContent = 'Сегодня';
-      const ts = document.createElement('div'); ts.className='sub'; ts.textContent = doneToday ? 'Сегодня — ✔' : 'Сегодня — ✖';
+      // индекс текущего дня от старта привычки (0-based)
+  const todayIdx = Math.max(0, daysBetween(h.start, todayKey) - 1);
+  const todayTaskText =
+    (h.plan && h.plan[todayIdx] && (h.plan[todayIdx].text || h.plan[todayIdx])) ||
+    (h.targetDays ? 'Задача появится после генерации плана' : 'Укажи срок, чтобы сгенерировать план');
+  
+  const tt = document.createElement('div');
+  tt.style.fontWeight='700';
+  tt.textContent = todayTaskText;
+  
+  const ts = document.createElement('div');
+  ts.className='sub';
+  ts.textContent = doneToday ? '✔ Выполнено' : '✖ Ещё не сделано';
+
       ti.appendChild(tt); ti.appendChild(ts);
       const muted = document.createElement('div'); muted.className='muted'; muted.textContent = doneToday ? 'Выполнено' : 'Не выполнено';
       todayRow.appendChild(check); todayRow.appendChild(ti); todayRow.appendChild(muted);
@@ -694,14 +729,92 @@ listRoot.appendChild(card);
     renderProfile();
   }
 
-  // Chat (same simple flow as before)
   function pushMsg(text, from='you'){
     const b = document.createElement('div');
     b.className = from==='you' ? 'bubble you' : 'bubble bot';
     b.textContent = text;
     messages.appendChild(b);
     messages.scrollTop = messages.scrollHeight;
+
+  // 👇 сохраняем в state.chat
+    const role = (from === 'you') ? 'user' : 'assistant';
+    state.chat = state.chat || [];
+    state.chat.push({ role, content: String(text) });
+    // ограничим историю, чтобы не раздувать localStorage
+    if (state.chat.length > 60) state.chat = state.chat.slice(-60);
+    saveState(state);
   }
+  // === API: Mistral proxy на Cloudflare ===
+const API_BASE = 'https://habbitserver.konayevna.workers.dev/chat';
+
+// Берём из state.chat только user/assistant
+function buildChatHistory() {
+  return (state.chat || []).map(m => ({ role: m.role, content: m.content }));
+}
+
+// Создание/поиск «текущей» привычки по извлечённым данным
+function ensureCurrentHabitFromExtracted(extracted) {
+  if (!extracted || !extracted.habit) return null;
+  // если есть уже выбранная — используем её
+  if (state.currentHabitId) {
+    return state.habits.find(h => h.id === state.currentHabitId) || null;
+  }
+  // ищем по имени
+  const byName = state.habits.find(h => h.name.toLowerCase() === extracted.habit.toLowerCase());
+  if (byName) { state.currentHabitId = byName.id; saveState(state); return byName; }
+  // создаём новую
+  const h = createHabit(extracted.habit);
+  // если у модели указан срок — сохраним
+  if (Number.isFinite(extracted.duration_days)) {
+    h.targetDays = Math.max(1, Math.min(365, extracted.duration_days|0));
+    saveState(state); renderAll();
+  }
+  return h;
+}
+
+// Основной вызов
+async function talkToApi() {
+  try {
+    const res = await fetch(API_BASE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: buildChatHistory() })
+    });
+    const data = await res.json();
+
+    // Показать ВСЕ сообщения ассистента (все промежуточные реплики до готовности плана)
+    if (Array.isArray(data.assistant_messages)) {
+      for (const msg of data.assistant_messages) pushMsg(msg, 'bot');
+    }
+
+    // Если модель извлекла имя/срок — сделаем/обновим текущую привычку
+    if (data.extracted) {
+      const h = ensureCurrentHabitFromExtracted(data.extracted);
+      if (h && Number.isFinite(data.extracted.duration_days)) {
+        h.targetDays = Math.max(1, Math.min(365, data.extracted.duration_days|0));
+        saveState(state); renderAll();
+      }
+    }
+
+    // Если план готов — кладём в привычку, НО в чат не показываем
+    if (data.status === 'ready' && Array.isArray(data.plan) && data.plan.length) {
+      // если вдруг не выбрана привычка — создадим из extracted
+      let h = state.currentHabitId ? state.habits.find(x=>x.id===state.currentHabitId) : null;
+      if (!h) h = ensureCurrentHabitFromExtracted(data.extracted || {});
+      if (h) {
+        h.plan = data.plan.map(it => ({ day: it.day, text: it.text }));
+        h.planGeneratedAt = Date.now();
+        if (!Number.isFinite(h.targetDays)) h.targetDays = data.plan.length;
+        saveState(state); renderAll();
+      }
+    }
+  } catch (e) {
+    console.error(e);
+    pushMsg('Что-то пошло не так. Попробуем ещё раз?', 'bot');
+  }
+}
+
+
   
   function parseHabitIntent(text){
     const t = text.trim();
@@ -735,73 +848,62 @@ listRoot.appendChild(card);
     return null;
   }
 
-  /* === MISTRAL CHAT INTEGRATION === */
-async function askServer(userText) {
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble you';
-  bubble.textContent = userText;
-  messages.appendChild(bubble);
-  messages.scrollTop = messages.scrollHeight;
+  function botReply(q){
+    const text = q.trim();
 
-  const typing = document.createElement('div');
-  typing.className = 'bubble bot';
-  typing.textContent = '…';
-  messages.appendChild(typing);
-  messages.scrollTop = messages.scrollHeight;
+    // If we're waiting for duration, prioritize that flow
+    if(state.pending && state.pending.type==='duration' && state.pending.habitId){
+      const num = (text.match(/(\d{1,3})/)||[])[1];
+      if(num){
+        const n = Math.max(1, Math.min(365, parseInt(num,10)));
+        const h = state.habits.find(x=>x.id===state.pending.habitId);
+        if(h){ h.targetDays = n; saveState(state); renderAll(); }
+        pushMsg(`Отлично, ставлю срок: ${n} дней.`, 'bot');
+        state.pending = null; saveState(state);
+        showView('view-habit');
+        return;
+      } else {
+        pushMsg('Напиши число дней, например: 30', 'bot');
+        return;
+      }
+    }
 
-  try {
-    const res = await fetch('https://habbitserver.konayevna.workers.dev/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: userText })
-    });
+    // New: try to parse full intent from a single message
+    const parsed = parseHabitIntent(text);
+    if(parsed && parsed.name){
+      const h = createHabit(parsed.name);
+      if(parsed.days){
+        h.targetDays = parsed.days;
+        saveState(state); renderAll();
+        pushMsg(`Добавил: «${h.name}» на ${parsed.days} дней. Удачи!`, 'bot');
+        showView('view-habit');
+        return;
+      } else {
+        pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+        state.pending = { type:'duration', habitId: h.id }; saveState(state);
+        return;
+      }
+    }
 
-    typing.remove();
-
-    if (!res.ok) {
-      const err = await res.text();
-      const errBubble = document.createElement('div');
-      errBubble.className = 'bubble bot';
-      errBubble.textContent = '⚠️ Ошибка сервера: ' + (err || res.status);
-      messages.appendChild(errBubble);
+    // Legacy flows below kept for compatibility
+    if(state.pending && state.pending.type==='name'){
+      const name = text.replace(/^привыч(ка|ку)?\s*/i, '').trim() || 'Новая привычка';
+      const h = createHabit(name);
+      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+      state.pending = { type:'duration', habitId: h.id }; saveState(state);
       return;
     }
 
-    const ct = res.headers.get('content-type') || '';
-    let replyText = '';
-
-    if (ct.includes('application/json')) {
-      const data = await res.json();
-      replyText = data.reply || data.output || data.message || '';
-    } else {
-      replyText = await res.text();
+    const numInline = (text.match(/(\d{1,3})/)||[])[1];
+    if(numInline){
+      const h = state.habits[0];
+      if(h){
+        const n = Math.max(1, Math.min(365, parseInt(numInline,10)));
+        h.targetDays = n; saveState(state); renderAll();
+        pushMsg(`Ок, срок для «${h.name}»: ${n} дней.`, 'bot');
+        return;
+      }
     }
-
-    const botBubble = document.createElement('div');
-    botBubble.className = 'bubble bot';
-    botBubble.textContent = replyText.trim();
-    messages.appendChild(botBubble);
-    messages.scrollTop = messages.scrollHeight;
-
-  } catch (e) {
-    typing.remove();
-    const errBubble = document.createElement('div');
-    errBubble.className = 'bubble bot';
-    errBubble.textContent = '🚧 Ошибка сети, попробуй позже.';
-    messages.appendChild(errBubble);
-  }
-}
-
-function send() {
-  const t = (chatInput?.value || '').trim();
-  if (!t) return;
-  chatInput.value = '';
-  askServer(t);
-}
-
-sendBtn?.addEventListener('click', send);
-chatInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-
 
     const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(text) && !/дн|дней|day|days/i.test(text);
     if(looksLikeName){
@@ -823,7 +925,9 @@ chatInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); }
   function send(){
     const t = (chatInput?.value||'').trim();
     if(!t) return;
-    pushMsg(t, 'you'); chatInput.value=''; botReply(t);
+    pushMsg(t, 'you'); // сначала пишем в историю/чат
+    chatInput.value='';
+    talkToApi();       // затем дергаем API, оно пришлет ВСЕ промежуточные ответы
   }
   sendBtn?.addEventListener('click', send);
   chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
