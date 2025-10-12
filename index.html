@@ -399,27 +399,20 @@ body.kb-open nav.bottom{
       return s;
     }catch(e){ return JSON.parse(JSON.stringify(defaultState)); }
   }
-// --- Safe shims for accidental global querySelector/querySelectorAll usage ---
-(function(){
+// --- Safe shims: allow calling querySelector / querySelectorAll globally ---
+(function () {
   const _qs  = (sel, root) => (root || document).querySelector(sel);
   const _qsa = (sel, root) => (root || document).querySelectorAll(sel);
 
-  // 1) Добавляем свойства окна (на случай window.querySelector)
-  if (typeof window.querySelector !== 'function')   window.querySelector   = _qs;
+  // На объекте окна
+  if (typeof window.querySelector !== 'function')    window.querySelector = _qs;
   if (typeof window.querySelectorAll !== 'function') window.querySelectorAll = _qsa;
 
-  // 2) Объявляем глобальные переменные (на случай вызова без document.)
-  try { void querySelector; }    
-  catch(e){ 
-    window.querySelector = _qs; 
-    (0,eval)('var querySelector = window.querySelector;'); 
-  }
-  try { void querySelectorAll; } 
-  catch(e){ 
-    window.querySelectorAll = _qsa; 
-    (0,eval)('var querySelectorAll = window.querySelectorAll;'); 
-  }
+  // На глобальном объекте (работает и в strict)
+  if (typeof globalThis.querySelector !== 'function')    globalThis.querySelector = _qs;
+  if (typeof globalThis.querySelectorAll !== 'function') globalThis.querySelectorAll = _qsa;
 })();
+
 
 
   // DOM
@@ -1586,7 +1579,7 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
   }
   function updateChip(){
     const s=getState()||{}; const c=document.getElementById('series-chip-gold'); if(!c) return;
-    const t=c.querySelector('.series-text') || querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
+    const t=c.querySelector('.series-text') || document.querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
   }
 
   document.addEventListener('click',function(e){
@@ -1686,7 +1679,7 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
     const s = getState() || {};
     const v = (s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
     if(chip){
-      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || querySelector('.txt');
+      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || document.querySelector('.txt');
       if(txt){ txt.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']); }
     }
   }
@@ -1712,6 +1705,9 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
       holder.appendChild(chip);
     }
   }
+  // алиас на случай старых вызовов
+  window.updateGoldChipRect = ensureGoldChip;
+
 
   function recomputeAndPersist(){
     const s = getState() || {};
@@ -1721,7 +1717,7 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
       s.profile.streak = v;
       setState(s);
     }
-    updateGoldChipText();
+    updateChip();
   }
 
   document.addEventListener('DOMContentLoaded', function(){
