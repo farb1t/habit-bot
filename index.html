@@ -865,6 +865,7 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
   if (!Array.isArray(msgs) || msgs.length === 0) {
     pushMsg('План готов — добавлю его в календарь. Хочешь советы по закреплению?', 'bot');
   }
+  showView('view-habit');
 }
 
 // 4) Если сервер вернул ошибку
