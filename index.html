@@ -1578,7 +1578,33 @@ async function talkToApi() {
     p.querySelectorAll('#streak-chip-el').forEach(n=>n.remove());
     h.querySelectorAll('span').forEach(n=>{ if(n.id!=='series-chip-gold') n.remove(); });
   }
- 
+
+   /* ==== chip === */
+function ensureChip(){
+  const p = document.getElementById('view-profile');
+  if (!p) return;
+  const name = p.querySelector('.name');
+  let holder = document.getElementById('series-chip-holder');
+  if (!holder) {
+    holder = document.createElement('div');
+    holder.id = 'series-chip-holder';
+    p.appendChild(holder);
+  }
+}
+
+  function updateChip(){
+  const s = getState() || {};
+  const chip = document.getElementById('series-chip-gold');
+  if (!chip) return;
+  const v = s.profile?.streak || 0;
+  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
+  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
+}
+
+// Алиасы для совместимости со старым кодом
+window.updateGoldChipText = updateChip;
+window.updateGoldChipRect = ensureChip;
+
 
 
   document.addEventListener('click',function(e){
@@ -1812,32 +1838,7 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('achv-close')?.addEventListener('click',closeModal,{passive:true});
   document.getElementById('achv-backdrop')?.addEventListener('click',e=>{if(e.target.id==='achv-backdrop')closeModal();},{passive:true});
 
-  /* ==== chip === */
-function ensureChip(){
-  const p = document.getElementById('view-profile');
-  if (!p) return;
-  const name = p.querySelector('.name');
-  let holder = document.getElementById('series-chip-holder');
-  if (!holder) {
-    holder = document.createElement('div');
-    holder.id = 'series-chip-holder';
-    p.appendChild(holder);
-  }
-}
-
-  function updateChip(){
-  const s = getState() || {};
-  const chip = document.getElementById('series-chip-gold');
-  if (!chip) return;
-  const v = s.profile?.streak || 0;
-  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
-  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
-}
-
-// Алиасы для совместимости со старым кодом
-window.updateGoldChipText = updateChip;
-window.updateGoldChipRect = ensureChip;
-
+ 
   
 
   /* ==== medals render fallback (if window.renderBadges missing) ==== */
