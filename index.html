@@ -1567,43 +1567,7 @@ async function talkToApi() {
   document.getElementById('achv-close')?.addEventListener('click',closeModal,{passive:true});
   document.getElementById('achv-backdrop')?.addEventListener('click',e=>{if(e.target.id==='achv-backdrop')closeModal();},{passive:true});
 
-  function ensureChip(){
-    const p=document.getElementById('view-profile'); if(!p) return;
-    const name=p.querySelector('.name');
-    let h=document.getElementById('series-chip-holder');
-    if(!h){ h=document.createElement('div'); h.id='series-chip-holder'; h.className='series-chip-place'; if(name&&name.parentElement) name.parentElement.after(h); else p.prepend(h); }
-    let c=document.getElementById('series-chip-gold');
-    if(!c){ c=document.createElement('span'); c.id='series-chip-gold'; c.className='series-chip-gold'; c.innerHTML='<span class="flame">🔥</span><span class="series-text">Серия 0 дней</span>'; h.innerHTML=''; h.appendChild(c); }
-    // cleanup duplicates
-    p.querySelectorAll('#streak-chip-el').forEach(n=>n.remove());
-    h.querySelectorAll('span').forEach(n=>{ if(n.id!=='series-chip-gold') n.remove(); });
-  }
-
-   /* ==== chip === */
-function ensureChip(){
-  const p = document.getElementById('view-profile');
-  if (!p) return;
-  const name = p.querySelector('.name');
-  let holder = document.getElementById('series-chip-holder');
-  if (!holder) {
-    holder = document.createElement('div');
-    holder.id = 'series-chip-holder';
-    p.appendChild(holder);
-  }
-}
-
-  function updateChip(){
-  const s = getState() || {};
-  const chip = document.getElementById('series-chip-gold');
-  if (!chip) return;
-  const v = s.profile?.streak || 0;
-  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
-  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
-}
-
-// Алиасы для совместимости со старым кодом
-window.updateGoldChipText = updateChip;
-window.updateGoldChipRect = ensureChip;
+  
 
 
 
@@ -1732,6 +1696,40 @@ window.updateGoldChipRect = ensureChip;
     }
   }
   
+/* ==== chip (series) core ==== */
+function ensureChip(){
+  const p = document.getElementById('view-profile'); if (!p) return;
+  let holder = document.getElementById('series-chip-holder');
+  if (!holder) {
+    holder = document.createElement('div');
+    holder.id = 'series-chip-holder';
+    p.prepend(holder); // или после .name — как у тебя было
+  }
+  let chip = document.getElementById('series-chip-gold');
+  if (!chip) {
+    chip = document.createElement('span');
+    chip.id = 'series-chip-gold';
+    chip.className = 'series-chip-gold';
+    chip.innerHTML = '<span class="flame">🔥</span><span class="series-text">Серия 0 дней</span>';
+    holder.innerHTML = '';
+    holder.appendChild(chip);
+  }
+}
+
+function updateChip(){
+  const s = getState() || {};
+  const chip = document.getElementById('series-chip-gold');
+  if (!chip) return;
+  const v = (s.profile && s.profile.streak) ? s.profile.streak : 0;
+  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
+  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
+}
+
+// алиасы и «глобализация», чтобы старые имена тоже работали
+window.ensureChip = ensureChip;
+window.updateChip = updateChip;
+window.updateGoldChipRect = ensureChip;
+window.updateGoldChipText = updateChip;
 
 
   function recomputeAndPersist(){
