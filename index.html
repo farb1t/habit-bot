@@ -1052,155 +1052,86 @@ if (norm?.error) {
     }
   }catch(e){}
 
-  // Debug badge
-  try{
-    const badge = document.createElement('div');
-    badge.textContent = 'JS OK';
-    badge.style.position='fixed'; badge.style.right='10px'; badge.style.bottom='10px';
-    badge.style.background='rgba(0,0,0,0.5)'; badge.style.padding='6px 10px'; badge.style.borderRadius='8px'; badge.style.fontSize='12px';
-    badge.style.zIndex='9999';
-    document.body.appendChild(badge);
-    setTimeout(()=>badge.remove(), 1500);
-  }catch(e){}
+  <script>
+// Debug badge
+try {
+  const badge = document.createElement('div');
+  badge.textContent = 'JS OK';
+  badge.style.position = 'fixed';
+  badge.style.right = '10px';
+  badge.style.bottom = '10px';
+  badge.style.background = 'rgba(0,0,0,0.5)';
+  badge.style.padding = '6px 10px';
+  badge.style.borderRadius = '8px';
+  badge.style.zIndex = '9999';
+  document.body.appendChild(badge);
+  setTimeout(() => badge.remove(), 1500);
+} catch (e) {}
 
 // --- Mobile-friendly avatar upload ---
-(function(){
-  // Try to detect an avatar <img> or clickable area
-  const avatarImg = document.querySelector('.profile-avatar img, img#avatar, .avatar img, .user-avatar img') ||
-                    document.querySelector('#avatar, .profile-avatar, .avatar, .user-avatar');
+(function () {
+  function qs(sel, root){ return (root || document).querySelector(sel); }
 
-  const fileInput = document.getElementById('avatarFile');
+  const avatarImg =
+    qs('.profile-avatar img, img#avatar, .avatar img, .user-avatar img') ||
+    qs('#avatar, .profile-avatar, .avatar, .user-avatar');
 
-  function loadSavedAvatar(){
+  const fileInput =
+    document.getElementById('avatarFile') ||
+    (function () {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.capture = 'user';
+      input.style.position = 'absolute';
+      input.style.left = '-9999px';
+      document.body.appendChild(input);
+      return input;
+    })();
+
+  function loadSavedAvatar() {
     try {
-      let saved = localStorage.getItem('profile.avatar');
-      if(!saved){
-        const raw = localStorage.getItem('habit_traker_demo_v3');
-        if(raw){ try { const s = JSON.parse(raw); saved = s?.profile?.avatar || ''; } catch(e){} }
-      }
-      if(saved && avatarImg){
-        if(avatarImg.tagName.toLowerCase()==='img'){
-          avatarImg.src = saved;
-          try{ avatarImg.classList.remove('hidden'); }catch(e){}
-          try{ const ph=document.getElementById('avatar-placeholder'); if(ph) ph.style.display='none'; }catch(e){}
-        } else {
-          avatarImg.style.backgroundImage = 'url(' + saved + ')';
-          avatarImg.style.backgroundSize = 'cover';
-          avatarImg.style.backgroundPosition = 'center';
-        }
-      }
-    } catch(e){ /* noop */ }
+      const data = localStorage.getItem('avatar:data');
+      if (data && avatarImg) avatarImg.src = data;
+    } catch (e) {}
   }
 
-  function dataURLFromFile(file, done){
-    const reader = new FileReader();
-    reader.onload = () => done(null, reader.result);
-    reader.onerror = err => done(err);
-    reader.readAsDataURL(file);
-  }
-
-  function resizeDataURL(dataURL, maxSize, cb){
-    const img = new Image();
-    img.onload = function(){
-      let w = img.width, h = img.height;
-      if(w <= maxSize && h <= maxSize){
-        return cb(null, dataURL);
-      }
-      if(w > h){
-        h = Math.round(h * (maxSize / w));
-        w = maxSize;
-      } else {
-        w = Math.round(w * (maxSize / h));
-        h = maxSize;
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, w, h);
-      // Use JPEG to reduce size, fallback to PNG
-      let out = canvas.toDataURL('image/jpeg', 0.85);
-      if(!out) out = canvas.toDataURL('image/png');
-      cb(null, out);
-    };
-    img.onerror = function(){ cb(new Error('image load failed')); };
-    img.src = dataURL;
-  }
-
-  function setAvatar(src){
-    try { localStorage.setItem('profile.avatar', src); } catch(e){ /* ignore */ }
-    // Sync main app state storage so renderProfile() also sees it
-    try {
-      const k='habit_traker_demo_v3';
-      const raw=localStorage.getItem(k);
-      if(raw){
-        const s=JSON.parse(raw);
-        s.profile = s.profile || {};
-        s.profile.avatar = src;
-        localStorage.setItem(k, JSON.stringify(s));
-      }
-    } catch(e){ /* ignore */ }
-    // Apply to DOM
-    if(avatarImg){
-      if(avatarImg.tagName.toLowerCase()==='img'){
-        avatarImg.src = src;
-        try{ avatarImg.classList.remove('hidden'); }catch(e){}
-        try{ const ph=document.getElementById('avatar-placeholder'); if(ph) ph.style.display='none'; }catch(e){}
-      } else {
-        avatarImg.style.backgroundImage = 'url(' + src + ')';
-        avatarImg.style.backgroundSize = 'cover';
-        avatarImg.style.backgroundPosition = 'center';
-      }
-    }
-  }
-
-  function handleFiles(files){
+  function handleFiles(files) {
     const f = files && files[0];
-    if(!f) return;
-    if(!/^image\\//i.test(f.type)) return;
-    dataURLFromFile(f, function(err, dataURL){
-      if(err) return;
-      resizeDataURL(dataURL, 512, function(err2, resized){
-        if(err2 || !resized) return;
-        setAvatar(resized);
-      });
-    });
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = e.target.result;
+      try { localStorage.setItem('avatar:data', data); } catch (e) {}
+      if (avatarImg) avatarImg.src = data;
+    };
+    reader.readAsDataURL(f);
   }
 
-  function init(){
-    // If mobile file input missing, try to use existing #avatar-input
-    const altInput = document.getElementById('avatar-input');
-    if(!fileInput && !altInput) return;
-    const effectiveInput = fileInput || altInput;
-    // iOS requires user gesture: click on avatar should trigger file input
-    if(avatarImg){
-      const makeClickable = (el)=>{
-        el.style.cursor = 'pointer';
-        el.setAttribute('role','button');
-        el.setAttribute('tabindex','0');
-        const openPicker = ()=> effectiveInput && effectiveInput.click();
-        el.addEventListener('click', openPicker, {passive:true});
-        el.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' ') { e.preventDefault(); openPicker(); } });
-      };
-      makeClickable(avatarImg);
-    }
-    effectiveInput.addEventListener('change', function(e){
-      handleFiles(e.target.files);
-      // Reset value so selecting the same file again still fires change
-      e.target.value = '';
-    }, {passive:true});
+  function init() {
+    if (!fileInput) return;
 
-    // Restore saved avatar on load
+    fileInput.addEventListener(
+      'change',
+      (e) => {
+        handleFiles(e.target.files);
+        // сбрасываем, чтобы выбор того же файла снова триггерил change
+        e.target.value = '';
+      },
+      { passive: true }
+    );
+
     loadSavedAvatar();
   }
 
-  if(document.readyState === 'loading'){
+  if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-})();
-
+})();  // ← IIFE закрыта
 </script>
+
 <style>.bottom *{pointer-events:auto !important;}</style>
 
   <input type="file" id="avatarFile" accept="image/*" capture="user" style="position:absolute;left:-9999px;opacity:0;width:1px;height:1px;" aria-hidden="true">
