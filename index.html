@@ -1661,6 +1661,7 @@ async function talkToApi() {
     return forms[2];
   }
 
+
   function computeStreakFromState(s){
     if(!s || !Array.isArray(s.habits) || s.habits.length===0) return 0;
     let streak = 0;
@@ -1704,19 +1705,7 @@ async function talkToApi() {
       holder.appendChild(chip);
     }
   }
-  function updateChip(){
-  const s = getState() || {};
-  const chip = document.getElementById('series-chip-gold');
-  if (!chip) return;
-  const v = s.profile?.streak || 0;
-  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
-  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
-}
-
-// Алиасы для совместимости со старым кодом
-window.updateGoldChipText = updateChip;
-window.updateGoldChipRect = ensureChip;
-
+  
 
 
   function recomputeAndPersist(){
@@ -1836,6 +1825,20 @@ function ensureChip(){
   }
 }
 
+  function updateChip(){
+  const s = getState() || {};
+  const chip = document.getElementById('series-chip-gold');
+  if (!chip) return;
+  const v = s.profile?.streak || 0;
+  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
+  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
+}
+
+// Алиасы для совместимости со старым кодом
+window.updateGoldChipText = updateChip;
+window.updateGoldChipRect = ensureChip;
+
+  
 
   /* ==== medals render fallback (if window.renderBadges missing) ==== */
   function maybeRenderMedals(s){const box=document.getElementById('medals');if(!box) return; if(typeof window.renderBadges==='function'){try{window.renderBadges(s);}catch(_){}}}
