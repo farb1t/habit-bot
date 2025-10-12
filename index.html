@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <!-- === MOBILE ADAPTATION === -->
@@ -71,17 +70,6 @@
     *{ animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
   }
 </style>
-<script>
-(function (w, d) {
-  if (typeof w.querySelector !== 'function') {
-    w.querySelector = d.querySelector.bind(d);
-  }
-  if (typeof w.querySelectorAll !== 'function') {
-    w.querySelectorAll = d.querySelectorAll.bind(d);
-  }
-})(window, document);
-</script>
-
 <script>
   // 100dvh fix for iOS Safari: update --vh on resize/orientation
   (function(){
@@ -352,7 +340,7 @@ body.kb-open nav.bottom{
     <section class="view hidden" id="view-profile">
       <div class="profile">
         <label class="avatar" id="avatar-label">
-          <img alt="avatar" class="hidden" id="avatar-img" src=""/>
+          <img alt="avatar" class="hidden" id="avatar-img" src=""/ decoding="async" loading="eager" >
           <div id="avatar-placeholder">👤</div>
           <input accept="image/*" id="avatar-input" style="display:none" type="file"/>
         </label>
@@ -706,26 +694,128 @@ listRoot.appendChild(card);
     renderProfile();
   }
 
-// --- Minimal chat stub (no legacy bot logic) ---
-function pushMsg(text, from='you'){
-  const b = document.createElement('div');
-  b.className = from === 'you' ? 'bubble you' : 'bubble bot';
-  b.textContent = text;
-  messages.appendChild(b);
-  messages.scrollTop = messages.scrollHeight;
-}
+  // Chat (same simple flow as before)
+  function pushMsg(text, from='you'){
+    const b = document.createElement('div');
+    b.className = from==='you' ? 'bubble you' : 'bubble bot';
+    b.textContent = text;
+    messages.appendChild(b);
+    messages.scrollTop = messages.scrollHeight;
+  }
+  
+  function parseHabitIntent(text){
+    const t = text.trim();
+    // Normalize spaces
+    let clean = t.replace(/\s+/g,' ').trim();
 
-function send(){
-  const t = (chatInput?.value || '').trim();
-  if(!t) return;
-  pushMsg(t, 'you');
-  chatInput.value = '';
-  // Никакой старой логики тут нет — дальше подключится патч Mistral (он перехватывает window.send)
-}
+    // Extract number of days (1..365)
+    const numMatch = clean.match(/(\d{1,3})/);
+    const days = numMatch ? Math.max(1, Math.min(365, parseInt(numMatch[1],10))) : null;
 
-sendBtn?.addEventListener('click', send);
-chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
+    // Remove helper words and the number to isolate a probable name
+    let name = clean
+      .replace(/^(добав(ь|и)|добавить|создай|создать|прибавь|сделай)\s*/i,'')
+      .replace(/\bна\s+\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
+      .replace(/\b\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
+      .replace(/\bдн(я|ей)?\b/gi,'')
+      .replace(/\bдень\b/gi,'')
+      .replace(/\s+/g,' ').trim();
 
+    // If message looks like a habit name (2..40 chars) and not only filler words
+    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(name || '') && !/дн|дней|day|days/i.test(name || '');
+
+    if(looksLikeName){
+      return { name, days };
+    }
+    // If the whole text looks like a name (without cleaning)
+    const asName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(clean) && !/дн|дней|day|days/i.test(clean);
+    if(asName){
+      return { name: clean, days };
+    }
+    return null;
+  }
+
+  function botReply(q){
+    const text = q.trim();
+
+    // If we're waiting for duration, prioritize that flow
+    if(state.pending && state.pending.type==='duration' && state.pending.habitId){
+      const num = (text.match(/(\d{1,3})/)||[])[1];
+      if(num){
+        const n = Math.max(1, Math.min(365, parseInt(num,10)));
+        const h = state.habits.find(x=>x.id===state.pending.habitId);
+        if(h){ h.targetDays = n; saveState(state); renderAll(); }
+        pushMsg(`Отлично, ставлю срок: ${n} дней.`, 'bot');
+        state.pending = null; saveState(state);
+        showView('view-habit');
+        return;
+      } else {
+        pushMsg('Напиши число дней, например: 30', 'bot');
+        return;
+      }
+    }
+
+    // New: try to parse full intent from a single message
+    const parsed = parseHabitIntent(text);
+    if(parsed && parsed.name){
+      const h = createHabit(parsed.name);
+      if(parsed.days){
+        h.targetDays = parsed.days;
+        saveState(state); renderAll();
+        pushMsg(`Добавил: «${h.name}» на ${parsed.days} дней. Удачи!`, 'bot');
+        showView('view-habit');
+        return;
+      } else {
+        pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+        state.pending = { type:'duration', habitId: h.id }; saveState(state);
+        return;
+      }
+    }
+
+    // Legacy flows below kept for compatibility
+    if(state.pending && state.pending.type==='name'){
+      const name = text.replace(/^привыч(ка|ку)?\s*/i, '').trim() || 'Новая привычка';
+      const h = createHabit(name);
+      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+      state.pending = { type:'duration', habitId: h.id }; saveState(state);
+      return;
+    }
+
+    const numInline = (text.match(/(\d{1,3})/)||[])[1];
+    if(numInline){
+      const h = state.habits[0];
+      if(h){
+        const n = Math.max(1, Math.min(365, parseInt(numInline,10)));
+        h.targetDays = n; saveState(state); renderAll();
+        pushMsg(`Ок, срок для «${h.name}»: ${n} дней.`, 'bot');
+        return;
+      }
+    }
+
+    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(text) && !/дн|дней|day|days/i.test(text);
+    if(looksLikeName){
+      const h = createHabit(text);
+      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+      state.pending = { type:'duration', habitId: h.id }; saveState(state);
+      return;
+    }
+
+    if(!state.habits || state.habits.length===0){
+      pushMsg('Что добавить в привычки? Просто напиши короткое название, например: «Пить воду».', 'bot');
+      state.pending = { type:'name' }; saveState(state);
+    } else {
+      pushMsg('Напиши название привычки, которую добавить. Можно сразу указать срок: «Пить воду 30».', 'bot');
+      state.pending = { type:'name' }; saveState(state);
+    }
+  }
+
+  function send(){
+    const t = (chatInput?.value||'').trim();
+    if(!t) return;
+    pushMsg(t, 'you'); chatInput.value=''; botReply(t);
+  }
+  sendBtn?.addEventListener('click', send);
+  chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
 
 
   // Avatar upload handler
@@ -772,7 +862,14 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
     }
   }catch(e){}
 
- 
+  try{
+    const welcomedKey = 'habit_welcome_shown';
+    const was = sessionStorage.getItem(welcomedKey);
+    if(!was){
+      pushMsg('Привет! Напиши короткое название привычки — я добавлю её и спрошу срок (в днях).', 'bot');
+      sessionStorage.setItem(welcomedKey, '1');
+    }
+  }catch(e){}
 
   // Debug badge
   try{
@@ -1306,10 +1403,8 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
   }
   function updateChip(){
     const s=getState()||{}; const c=document.getElementById('series-chip-gold'); if(!c) return;
-    const t = c.querySelector('.series-text') || document.querySelector('.txt');
-    const v = (s.profile?.streak) || 0;
-    if (t) t.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
-  }   
+    const t=c.querySelector('.series-text') || querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
+  }
 
   document.addEventListener('click',function(e){
     const today=!!e.target.closest('.today-check,.check');
@@ -1365,13 +1460,8 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
     }, today?140:70);
   }, {capture:true, passive:true});
 
-  document.addEventListener('DOMContentLoaded', function(){ 
-  ensureChip(); 
-  updateChip(); 
-});         // ← закрыли addEventListener
-
-})();       // ← закрыли IIFE
-
+  document.addEventListener('DOMContentLoaded', function(){ ensureChip(); updateChip(); });
+})();
 </script>
 <!-- === /PATCH === -->
 
@@ -1413,7 +1503,7 @@ chatInput?.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') send(); });
     const s = getState() || {};
     const v = (s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
     if(chip){
-      let txt = chip.querySelector('.series-text') || document.querySelector('.txt');
+      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || querySelector('.txt');
       if(txt){ txt.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']); }
     }
   }
@@ -1807,89 +1897,6 @@ document.addEventListener('DOMContentLoaded', function(){
   }catch(e){}
 })();
 </script>
-
-
-
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const API = 'https://habbitserver.konayevna.workers.dev/chat';
-
-  const messagesEl = document.getElementById('messages');
-  const inputEl    = document.getElementById('chat-input');
-  const sendBtn    = document.getElementById('send-btn');
-
-  if (!messagesEl || !inputEl || !sendBtn) {
-    console.warn('chat elements not found');
-    return;
-  }
-
-  // если кнопка внутри <form> — блокируем нативный submit
-  const form = sendBtn.closest('form') || inputEl.closest('form');
-  if (form) form.addEventListener('submit', e => { e.preventDefault(); send(); });
-  if (sendBtn.type !== 'button') sendBtn.type = 'button';
-
-  const HISTORY_KEY = 'habit_bot_chat_history_v1';
-  let history = [];
-  try { history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch {}
-  const persist = () => localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-
-  function addMsg(txt, who='bot'){
-    const b = document.createElement('div');
-    b.className = who === 'you' ? 'bubble you' : 'bubble bot';
-    b.textContent = txt;
-    messagesEl.appendChild(b);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    return b;
-  }
-
-  // приветствие один раз
-  if (!history.length) {
-    addMsg('👋 Привет! Помогу создать привычку. Напиши измеримую цель (например: "пить 2 литра воды в день").', 'bot');
-  }
-
-  async function send(){
-    const text = (inputEl.value || '').trim();
-    if (!text) return;
-
-    addMsg(text, 'you');
-    inputEl.value = '';
-
-    history.push({ role:'user', content:text }); persist();
-
-    try {
-      const resp = await fetch(API, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ stream:false, messages: history })
-      });
-
-      if (!resp.ok) {
-        const t = await resp.text();
-        addMsg('Ошибка: ' + resp.status + ' ' + t.slice(0,200), 'bot');
-        return;
-      }
-
-      const data = await resp.json().catch(()=>null);
-      const answer = data?.choices?.[0]?.message?.content || data?.message || 'Нет ответа 😔';
-      addMsg(answer, 'bot');
-
-      history.push({ role:'assistant', content: answer }); persist();
-    } catch(e) {
-      addMsg('Сбой соединения: ' + (e.message || e), 'bot');
-    }
-  }
-
-  sendBtn.addEventListener('click', send);
-  inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
-});
-</script>
-
-
-
-
-
-
-
 
 </body>
 </html>
