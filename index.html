@@ -735,62 +735,73 @@ listRoot.appendChild(card);
     return null;
   }
 
-  function botReply(q){
-    const text = q.trim();
+  /* === MISTRAL CHAT INTEGRATION === */
+async function askServer(userText) {
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble you';
+  bubble.textContent = userText;
+  messages.appendChild(bubble);
+  messages.scrollTop = messages.scrollHeight;
 
-    // If we're waiting for duration, prioritize that flow
-    if(state.pending && state.pending.type==='duration' && state.pending.habitId){
-      const num = (text.match(/(\d{1,3})/)||[])[1];
-      if(num){
-        const n = Math.max(1, Math.min(365, parseInt(num,10)));
-        const h = state.habits.find(x=>x.id===state.pending.habitId);
-        if(h){ h.targetDays = n; saveState(state); renderAll(); }
-        pushMsg(`Отлично, ставлю срок: ${n} дней.`, 'bot');
-        state.pending = null; saveState(state);
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg('Напиши число дней, например: 30', 'bot');
-        return;
-      }
-    }
+  const typing = document.createElement('div');
+  typing.className = 'bubble bot';
+  typing.textContent = '…';
+  messages.appendChild(typing);
+  messages.scrollTop = messages.scrollHeight;
 
-    // New: try to parse full intent from a single message
-    const parsed = parseHabitIntent(text);
-    if(parsed && parsed.name){
-      const h = createHabit(parsed.name);
-      if(parsed.days){
-        h.targetDays = parsed.days;
-        saveState(state); renderAll();
-        pushMsg(`Добавил: «${h.name}» на ${parsed.days} дней. Удачи!`, 'bot');
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-        state.pending = { type:'duration', habitId: h.id }; saveState(state);
-        return;
-      }
-    }
+  try {
+    const res = await fetch('https://habbitserver.konayevna.workers.dev/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: userText })
+    });
 
-    // Legacy flows below kept for compatibility
-    if(state.pending && state.pending.type==='name'){
-      const name = text.replace(/^привыч(ка|ку)?\s*/i, '').trim() || 'Новая привычка';
-      const h = createHabit(name);
-      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-      state.pending = { type:'duration', habitId: h.id }; saveState(state);
+    typing.remove();
+
+    if (!res.ok) {
+      const err = await res.text();
+      const errBubble = document.createElement('div');
+      errBubble.className = 'bubble bot';
+      errBubble.textContent = '⚠️ Ошибка сервера: ' + (err || res.status);
+      messages.appendChild(errBubble);
       return;
     }
 
-    const numInline = (text.match(/(\d{1,3})/)||[])[1];
-    if(numInline){
-      const h = state.habits[0];
-      if(h){
-        const n = Math.max(1, Math.min(365, parseInt(numInline,10)));
-        h.targetDays = n; saveState(state); renderAll();
-        pushMsg(`Ок, срок для «${h.name}»: ${n} дней.`, 'bot');
-        return;
-      }
+    const ct = res.headers.get('content-type') || '';
+    let replyText = '';
+
+    if (ct.includes('application/json')) {
+      const data = await res.json();
+      replyText = data.reply || data.output || data.message || '';
+    } else {
+      replyText = await res.text();
     }
+
+    const botBubble = document.createElement('div');
+    botBubble.className = 'bubble bot';
+    botBubble.textContent = replyText.trim();
+    messages.appendChild(botBubble);
+    messages.scrollTop = messages.scrollHeight;
+
+  } catch (e) {
+    typing.remove();
+    const errBubble = document.createElement('div');
+    errBubble.className = 'bubble bot';
+    errBubble.textContent = '🚧 Ошибка сети, попробуй позже.';
+    messages.appendChild(errBubble);
+  }
+}
+
+function send() {
+  const t = (chatInput?.value || '').trim();
+  if (!t) return;
+  chatInput.value = '';
+  askServer(t);
+}
+
+sendBtn?.addEventListener('click', send);
+chatInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+
 
     const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(text) && !/дн|дней|day|days/i.test(text);
     if(looksLikeName){
