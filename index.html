@@ -799,82 +799,82 @@ async function talkToApi() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: buildChatHistory() })
     });
+
     const data = await res.json();
 
-        // ===== DEBUG: всегда логируем ответ сервера в консоль =====
-console.log('[API /chat] response:', data);
+    // ===== DEBUG: всегда логируем ответ сервера в консоль =====
+    console.log('[API /chat] response:', data);
 
-// Нормализация форматов (на случай строк/choices)
-let norm = data;
-if (typeof norm === 'string') {
-  try { norm = JSON.parse(norm); } catch {}
-}
-if (norm && norm.choices && norm.choices[0]?.message?.content) {
-  try { norm = JSON.parse(norm.choices[0].message.content); } catch {}
-}
-
-// 1) Показать ВСЕ ассистентские сообщения (промежуточные)
-const msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages : [];
-if (msgs.length) {
-  const lastBot = [...(state.chat || [])].reverse().find(m => m.role === 'assistant');
-  for (const msg of msgs) {
-    if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
-      pushMsg(msg, 'bot');
+    // Нормализация формата (строка → объект; choices → content)
+    let norm = data;
+    if (typeof norm === 'string') {
+      try { norm = JSON.parse(norm); } catch {}
     }
-  }
-} else if (norm?.status === 'asking') {
-  pushMsg('Не расслышала. Напиши привычку в измеримых единицах и срок (в днях).', 'bot');
-}
+    if (norm && norm.choices && norm.choices[0]?.message?.content) {
+      try { norm = JSON.parse(norm.choices[0].message.content); } catch {}
+    }
 
-// 2) Если извлечённые данные пришли — создать/обновить текущую привычку
-if (norm?.extracted) {
-  const h = ensureCurrentHabitFromExtracted(norm.extracted);
-  if (h && Number.isFinite(norm.extracted.duration_days)) {
-    h.targetDays = Math.max(1, Math.min(365, norm.extracted.duration_days | 0));
-    saveState(state);
-    renderAll();
-  }
-}
+    // 1) Показать ВСЕ ассистентские сообщения
+    const msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages : [];
+    if (msgs.length) {
+      const lastBot = [...(state.chat || [])].reverse().find(m => m.role === 'assistant');
+      for (const msg of msgs) {
+        if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
+          pushMsg(msg, 'bot');
+        }
+      }
+    } else if (norm?.status === 'asking') {
+      pushMsg('Не расслышала. Напиши привычку в измеримых единицах и срок (в днях).', 'bot');
+    }
 
-// 3) Если план готов — сохранить в привычку (в чат НЕ выводим)
-if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
-  let h = state.currentHabitId ? state.habits.find(x => x.id === state.currentHabitId) : null;
-  if (!h) h = ensureCurrentHabitFromExtracted(norm.extracted || {});
-  if (!h) {
-    // фоллбек: создаём пустую привычку и делаем её текущей
-    h = createHabit('Новая привычка');
-    state.currentHabitId = h.id;
-  }
+    // 2) Если извлечённые данные пришли — создать/обновить текущую привычку
+    if (norm?.extracted) {
+      const h = ensureCurrentHabitFromExtracted(norm.extracted);
+      if (h && Number.isFinite(norm.extracted.duration_days)) {
+        h.targetDays = Math.max(1, Math.min(365, norm.extracted.duration_days | 0));
+        saveState(state);
+        renderAll();
+      }
+    }
 
-  h.plan = norm.plan
-    .map(it => ({
-      day: Number.isFinite(it?.day) ? (it.day | 0) : 0,
-      text: String(it?.text || '').slice(0, 160)
-    }))
-    .filter(p => p.text);
+    // 3) Если план готов — сохранить в привычку (НЕ в чат)
+    if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
+      let h = state.currentHabitId ? state.habits.find(x => x.id === state.currentHabitId) : null;
+      if (!h) h = ensureCurrentHabitFromExtracted(norm.extracted || {});
+      if (!h) {
+        h = createHabit('Новая привычка');
+        state.currentHabitId = h.id;
+      }
 
-  h.planGeneratedAt = Date.now();
-  if (!Number.isFinite(h.targetDays)) h.targetDays = h.plan.length;
-  saveState(state);
-  renderAll();
+      h.plan = norm.plan
+        .map(it => ({
+          day: Number.isFinite(it?.day) ? (it.day | 0) : 0,
+          text: String(it?.text || '').slice(0, 160)
+        }))
+        .filter(p => p.text);
 
-  // короткое уведомление, если сервер его не прислал
-  if (!msgs.length) {
-    pushMsg('План готов — добавлю его в календарь. Хочешь советы по закреплению?', 'bot');
-  }
-}
+      h.planGeneratedAt = Date.now();
+      if (!Number.isFinite(h.targetDays)) h.targetDays = h.plan.length;
+      saveState(state);
+      renderAll();
 
-// 4) Если сервер вернул ошибку
-if (norm?.error) {
-  pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
-  console.warn('API error:', norm);
-}
+      if (!msgs.length) {
+        pushMsg('План готов — добавлю его в календарь. Хочешь советы по закреплению?', 'bot');
+      }
+    }
 
- catch (e) {
+    // 4) Ошибка сервера
+    if (norm?.error) {
+      console.warn('API error:', norm);
+      pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
+    }
+
+  } catch (e) {
     console.error(e);
     pushMsg('Что-то пошло не так. Попробуем ещё раз?', 'bot');
   }
 }
+
 
 
   
@@ -1578,13 +1578,7 @@ if (norm?.error) {
     p.querySelectorAll('#streak-chip-el').forEach(n=>n.remove());
     h.querySelectorAll('span').forEach(n=>{ if(n.id!=='series-chip-gold') n.remove(); });
   }
-  function updateChip(){
-    const s=getState()||{}; const c=document.getElementById('series-chip-gold'); if(!c) return;
-    const t=c.querySelector('.series-text') || document.querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
-  }
-  // === Алиасы для совместимости со старым кодом ===
-  window.updateGoldChipText = updateChip;
-  window.updateGoldChipRect = ensureChip;
+ 
 
 
   document.addEventListener('click',function(e){
@@ -1710,8 +1704,19 @@ if (norm?.error) {
       holder.appendChild(chip);
     }
   }
-  // алиас на случай старых вызовов
-  window.updateGoldChipRect = ensureGoldChip;
+  function updateChip(){
+  const s = getState() || {};
+  const chip = document.getElementById('series-chip-gold');
+  if (!chip) return;
+  const v = s.profile?.streak || 0;
+  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
+  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
+}
+
+// Алиасы для совместимости со старым кодом
+window.updateGoldChipText = updateChip;
+window.updateGoldChipRect = ensureChip;
+
 
 
   function recomputeAndPersist(){
@@ -1818,9 +1823,19 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('achv-close')?.addEventListener('click',closeModal,{passive:true});
   document.getElementById('achv-backdrop')?.addEventListener('click',e=>{if(e.target.id==='achv-backdrop')closeModal();},{passive:true});
 
-  /* ==== chip ==== */
-  function ensureChip(){const p=document.getElementById('view-profile');if(!p)return;const name=p.querySelector('.name');let holder=document.getElementById('series-chip-holder');if(!holder){holder=document.createElement('div');holder.id='series-chip-holder';holder.className='series-chip-place';if(name&&name.parentElement)name.parentElement.after(holder);else p.prepend(holder);}let chip=document.getElementById('series-chip-gold');if(!chip){chip=document.createElement('span');chip.id='series-chip-gold';chip.className='series-chip-gold';chip.innerHTML='<span class="flame">🔥</span><span class="series-text">Серия 0 дней</span>';holder.innerHTML='';holder.appendChild(chip);}p.querySelectorAll('#streak-chip-el').forEach(n=>n.remove());holder.querySelectorAll('span').forEach(n=>{if(n.id!=='series-chip-gold')n.remove();});}
-  function updateChip(){const s=getState()||{};ensureFields(s);const chip=document.getElementById('series-chip-gold');if(!chip)return;const v=s.profile.streak||0;const span=chip.querySelector('.series-text');if(span)span.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);}
+  /* ==== chip === */
+function ensureChip(){
+  const p = document.getElementById('view-profile');
+  if (!p) return;
+  const name = p.querySelector('.name');
+  let holder = document.getElementById('series-chip-holder');
+  if (!holder) {
+    holder = document.createElement('div');
+    holder.id = 'series-chip-holder';
+    p.appendChild(holder);
+  }
+}
+
 
   /* ==== medals render fallback (if window.renderBadges missing) ==== */
   function maybeRenderMedals(s){const box=document.getElementById('medals');if(!box) return; if(typeof window.renderBadges==='function'){try{window.renderBadges(s);}catch(_){}}}
