@@ -1005,6 +1005,14 @@ function botReply(q) {
 
   // временное хранилище ответов пользователя на шаги мастера
   state.tmpPlan = state.tmpPlan || {};
+  // если нет активного вопроса — начинаем мастер создания привычки
+if (!state.pending) {
+  pushMsg('Как назовём привычку? Коротко — то, что будет видно во вкладке «Задания».', 'bot');
+  state.pending = { type: 'name', habitId: state.currentHabitId || null };
+  saveState(state);
+  return;
+}
+
 
   // ===== ШАГ 1: имя привычки =====
   if (state.pending?.type === 'name') {
