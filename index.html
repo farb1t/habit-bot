@@ -435,7 +435,7 @@ body.kb-open nav.bottom{
   const avatarLabel = document.getElementById('avatar-label');
 
 
-  let state = loadState();
+  window.state = loadState();
   if(!('pending' in state)) state.pending = null;
 
   // Показать приветствие один раз при первом запуске
