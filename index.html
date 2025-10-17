@@ -1000,102 +1000,117 @@ if (norm?.error) {
     return null;
   }
 
-  function botReply(q){
-    const text = q.trim();
-    // где-то в начале botReply, один раз на входе:
-state.tmpPlan = state.tmpPlan || {};
+function botReply(q) {
+  const text = String(q || '').trim();
 
-    // ===== пошаговый сценарий: принимаем ответы на вопросы =====
-// в самом начале botReply один раз уже есть:
-// state.tmpPlan = state.tmpPlan || {};
+  // временное хранилище ответов пользователя на шаги мастера
+  state.tmpPlan = state.tmpPlan || {};
 
-if (state.pending && state.pending.type === 'name') {
-  const name = text.trim();
-  if (name.length < 2 || name.length > 50) {
-    pushMsg('Нужно короткое понятное название (2–50 символов). Попробуй ещё раз.', 'bot');
-    return;
-  }
-
-  state.tmpPlan.habit = name;
-  saveState(state);
-  pushMsg(`Ок, название: «${name}».`, 'bot');
-
-  // ➜ следующий вопрос: цель
-  pushMsg('Какая у тебя конкретная цель? Укажи число и единицу: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
-  state.pending = { type: 'goal', habitId: state.currentHabitId || null };
-  saveState(state);
-  return;
-}
-
-
-if (state.pending && state.pending.type === 'goal') {
-  const t = text.trim();
-  if (!/\d/.test(t)) {
-    pushMsg('Добавь число и единицу измерения: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
-    return;
-  }
-
-  state.tmpPlan.goal = t;
-  saveState(state);
-  pushMsg(`Цель приняла: ${t}.`, 'bot');
-
-  // ➜ следующий вопрос: текущий уровень
-  pushMsg('Сколько ты делаешь сейчас? Примеры: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет».', 'bot');
-  state.pending = { type: 'level', habitId: state.currentHabitId || null };
-  saveState(state);
-  return;
-}
-
-
-  state.tmpPlan.current_level = t;
-  saveState(state);
-  pushMsg(`Записала текущий уровень: ${t}.`, 'bot');
-
-  // ➜ спрашиваем срок, а НЕ вызываем talkToApi()
-  pushMsg('На сколько дней берём срок? Минимум 30. Напиши число, например: 30.', 'bot');
-  state.pending = { type: 'duration', habitId: state.currentHabitId || null };
-  saveState(state);
-  return;
-}
-
-
-if (state.pending && state.pending.type === 'duration') {
-  const m = text.match(/(\d{1,3})/);
-  if (!m) {
-    pushMsg('Напиши просто число дней. Минимум 30. Например: 30.', 'bot');
-    return;
-  }
-
-  const days = Math.max(1, Math.min(365, parseInt(m[1], 10)));
-  if (days < 30) {
-    // подсказываем и ждём новое число — pending остаётся 'duration'
-    pushMsg('Маловато для устойчивой привычки. Давай хотя бы 30–60 дней. Напиши число, например: 60.', 'bot');
-    return;
-  }
-
-  state.tmpPlan.duration_days = days;
-  saveState(state);
-  pushMsg(`Срок записала: ${days} дней.`, 'bot');
-
-  // обновляем саму привычку
-  const hid = state.pending.habitId || state.currentHabitId;
-  const h = state.habits.find(x => x.id === hid);
-  if (h) {
-    h.targetDays = days;
+  // ===== ШАГ 1: имя привычки =====
+  if (state.pending?.type === 'name') {
+    const name = text;
+    if (name.length < 2 || name.length > 50) {
+      pushMsg('Нужно короткое понятное название (2–50 символов). Попробуй ещё раз.', 'bot');
+      return;
+    }
+    state.tmpPlan.habit = name;
+    state.pending = null;
     saveState(state);
-    renderAll();
+    pushMsg(`Ок, название: «${name}».`, 'bot');
+
+    // следующий вопрос
+    pushMsg('Какая у тебя конкретная цель? Укажи число и единицу: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
+    state.pending = { type: 'goal', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
   }
 
-  // снимаем ожидание и запускаем генерацию плана на сервере
-  state.pending = null;
-  saveState(state);
+  // ===== ШАГ 2: цель =====
+  if (state.pending?.type === 'goal') {
+    if (!/\d/.test(text)) {
+      pushMsg('Добавь число и единицу измерения: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
+      return;
+    }
+    state.tmpPlan.goal = text;
+    state.pending = null;
+    saveState(state);
+    pushMsg(`Цель приняла: ${text}.`, 'bot');
 
-  pushMsg('Ок! Генерирую план…', 'bot');
-  talkToApi();
-  return;
+    // следующий вопрос
+    pushMsg('Сколько ты делаешь сейчас? Примеры: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет».', 'bot');
+    state.pending = { type: 'level', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
+  }
+
+  // ===== ШАГ 3: текущий уровень =====
+  if (state.pending?.type === 'level') {
+    const t = text.trim();
+    if (t.length < 1) {
+      pushMsg('Опиши, сколько делаешь сейчас. Примеры: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет».', 'bot');
+      return;
+    }
+    state.tmpPlan.current_level = t;
+    state.pending = null;
+    saveState(state);
+    pushMsg(`Записала текущий уровень: ${t}.`, 'bot');
+
+    // следующий вопрос
+    pushMsg('На сколько дней берём срок? Минимум 30. Напиши число, например: 30.', 'bot');
+    state.pending = { type: 'duration', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
+  }
+
+  // ===== ШАГ 4: срок =====
+  if (state.pending?.type === 'duration') {
+    const m = text.match(/(\d{1,3})/);
+    if (!m) {
+      pushMsg('Напиши просто число дней. Минимум 30. Например: 30.', 'bot');
+      return;
+    }
+    let days = Math.max(1, Math.min(365, parseInt(m[1], 10)));
+    if (days < 30) {
+      pushMsg('Маловато для устойчивой привычки. Давай хотя бы 30–60 дней. Напиши число, например: 60.', 'bot');
+      return;
+    }
+    state.tmpPlan.duration_days = days;
+    state.pending = null;
+    saveState(state);
+    pushMsg(`Срок записала: ${days} дней.`, 'bot');
+
+    // здесь уже можно вызывать сервер — он составит план
+    talkToApi();
+    return;
+  }
+
+  // ===== Если пользователь пишет вне сценария — запускаем мастер с начала =====
+  if (!state.tmpPlan.habit) {
+    pushMsg('Как назовём привычку? Коротко — то, что будет видно во вкладке «Задания».', 'bot');
+    state.pending = { type: 'name', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
+  }
+  if (!state.tmpPlan.goal || !/\d/.test(state.tmpPlan.goal)) {
+    pushMsg('Какая у тебя конкретная цель? Укажи число и единицу: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
+    state.pending = { type: 'goal', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
+  }
+  if (!state.tmpPlan.current_level) {
+    pushMsg('Сколько ты делаешь сейчас? Примеры: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет».', 'bot');
+    state.pending = { type: 'level', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
+  }
+  if (!Number.isFinite(state.tmpPlan.duration_days) || state.tmpPlan.duration_days < 30) {
+    pushMsg('На сколько дней берём срок? Минимум 30. Напиши число, например: 30.', 'bot');
+    state.pending = { type: 'duration', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
+  }
 }
 
-// ===== конец блока обработчиков =====
 
 
 
