@@ -1003,18 +1003,18 @@ if (norm?.error) {
 function botReply(q) {
   const text = String(q || '').trim();
 
-  // временное хранилище ответов пользователя на шаги мастера
+  // Временное хранилище ответов мастера
   state.tmpPlan = state.tmpPlan || {};
-  // если нет активного вопроса — начинаем мастер создания привычки
-if (!state.pending) {
-  pushMsg('Как назовём привычку? Коротко — то, что будет видно во вкладке «Задания».', 'bot');
-  state.pending = { type: 'name', habitId: state.currentHabitId || null };
-  saveState(state);
-  return;
-}
 
+  // Если нет активного шага — запускаем мастер с названия
+  if (!state.pending) {
+    pushMsg('Как назовём привычку? Коротко — то, что будет видно во вкладке «Задания».', 'bot');
+    state.pending = { type: 'name', habitId: state.currentHabitId || null };
+    saveState(state);
+    return;
+  }
 
-  // ===== ШАГ 1: имя привычки =====
+  // === ШАГ 1: название привычки ===
   if (state.pending?.type === 'name') {
     const name = text;
     if (name.length < 2 || name.length > 50) {
@@ -1026,14 +1026,14 @@ if (!state.pending) {
     saveState(state);
     pushMsg(`Ок, название: «${name}».`, 'bot');
 
-    // следующий вопрос
+    // Следующий вопрос — цель
     pushMsg('Какая у тебя конкретная цель? Укажи число и единицу: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
     state.pending = { type: 'goal', habitId: state.currentHabitId || null };
     saveState(state);
     return;
   }
 
-  // ===== ШАГ 2: цель =====
+  // === ШАГ 2: цель ===
   if (state.pending?.type === 'goal') {
     if (!/\d/.test(text)) {
       pushMsg('Добавь число и единицу измерения: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
@@ -1044,14 +1044,14 @@ if (!state.pending) {
     saveState(state);
     pushMsg(`Цель приняла: ${text}.`, 'bot');
 
-    // следующий вопрос
+    // Следующий вопрос — текущий уровень
     pushMsg('Сколько ты делаешь сейчас? Примеры: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет».', 'bot');
     state.pending = { type: 'level', habitId: state.currentHabitId || null };
     saveState(state);
     return;
   }
 
-  // ===== ШАГ 3: текущий уровень =====
+  // === ШАГ 3: текущий уровень ===
   if (state.pending?.type === 'level') {
     const t = text.trim();
     if (t.length < 1) {
@@ -1063,14 +1063,14 @@ if (!state.pending) {
     saveState(state);
     pushMsg(`Записала текущий уровень: ${t}.`, 'bot');
 
-    // следующий вопрос
+    // Следующий вопрос — срок
     pushMsg('На сколько дней берём срок? Минимум 30. Напиши число, например: 30.', 'bot');
     state.pending = { type: 'duration', habitId: state.currentHabitId || null };
     saveState(state);
     return;
   }
 
-  // ===== ШАГ 4: срок =====
+  // === ШАГ 4: срок (дни) ===
   if (state.pending?.type === 'duration') {
     const m = text.match(/(\d{1,3})/);
     if (!m) {
@@ -1087,12 +1087,12 @@ if (!state.pending) {
     saveState(state);
     pushMsg(`Срок записала: ${days} дней.`, 'bot');
 
-    // здесь уже можно вызывать сервер — он составит план
+    // Все 4 ответа есть — просим сервер сгенерировать план
     talkToApi();
     return;
   }
 
-  // ===== Если пользователь пишет вне сценария — запускаем мастер с начала =====
+  // === Фоллбеки: если пользователь пишет не по сценарию, донастроим шаг ===
   if (!state.tmpPlan.habit) {
     pushMsg('Как назовём привычку? Коротко — то, что будет видно во вкладке «Задания».', 'bot');
     state.pending = { type: 'name', habitId: state.currentHabitId || null };
@@ -1117,126 +1117,8 @@ if (!state.pending) {
     saveState(state);
     return;
   }
-
-
-
-
-
-
-
-    // New: try to parse full intent from a single message
-    const parsed = parseHabitIntent(text);
-    if(parsed && parsed.name){
-      const h = createHabit(parsed.name);
-      if(parsed.days){
-        h.targetDays = parsed.days;
-        saveState(state); renderAll();
-        pushMsg(`Добавил: «${h.name}» на ${parsed.days} дней. Удачи!`, 'bot');
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-        state.pending = { type:'duration', habitId: h.id }; saveState(state);
-        return;
-      }
-    }
-
-    // Legacy flows below kept for compatibility
-    if(state.pending && state.pending.type==='name'){
-      const name = text.replace(/^привыч(ка|ку)?\s*/i, '').trim() || 'Новая привычка';
-      const h = createHabit(name);
-      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-      state.pending = { type:'duration', habitId: h.id }; saveState(state);
-      return;
-    }
-    // pending: goal (цель привычки)
-if (state.pending && state.pending.type === 'goal') {
-  const goalText = text.trim();
-  const h = state.currentHabitId
-    ? state.habits.find(x => x.id === state.currentHabitId)
-    : createHabit('Новая привычка');
-
-  h.goal = goalText;
-  saveState(state);
-  renderAll();
-
-  pushMsg(`Отлично! Цель привычки: ${goalText}.`, 'bot');
-  state.pending = null;
-  saveState(state);
-
-  // если нет срока — спросим его
-  if (!h.targetDays) {
-    pushMsg('Теперь укажи срок (в днях). Минимум 30.', 'bot');
-    state.pending = { type: 'duration', habitId: h.id };
-    saveState(state);
-  } else {
-    pushMsg('Принято! Сейчас сгенерирую план.', 'bot');
-    talkToApi();
-  }
-  return;
 }
 
-    // pending: уровень (сколько делает сейчас)
-if (state.pending && state.pending.type === 'level') {
-  // вытаскиваем число из сообщения
-  const num = (text.match(/(\d+(?:[.,]\d+)?)/) || [])[1];
-  if (num) {
-    // сохраним как «текущий уровень» в выбранную привычку (если есть)
-    const h = state.currentHabitId
-      ? state.habits.find(x => x.id === state.currentHabitId)
-      : null;
-
-    const asNumber = Number(String(num).replace(',', '.'));
-    if (h) {
-      h.current_level = asNumber; // поле свободное, используем по месту
-      saveState(state);
-      renderAll();
-    }
-    pushMsg(`Поняла, текущий уровень: ${asNumber}.`, 'bot');
-    state.pending = null; saveState(state);
-
-    // Просим срок, если его ещё нет
-    if (!h || !Number.isFinite(h.targetDays)) {
-      pushMsg('Теперь укажи срок в днях (минимум 30). Напиши просто число, например: 30.', 'bot');
-      state.pending = { type: 'duration', habitId: h ? h.id : null }; saveState(state);
-    }
-    return;
-  } else {
-    pushMsg('Укажи число — «сейчас делаю X». Например: 10, 500, 2.5', 'bot');
-    return;
-  }
-}
-
-
-    const numInline = (text.match(/(\d{1,3})/)||[])[1];
-    if(numInline){
-      const h = state.habits[0];
-      if(h){
-        const n = Math.max(1, Math.min(365, parseInt(numInline,10)));
-        h.targetDays = n; saveState(state); renderAll();
-        pushMsg(`Ок, срок для «${h.name}»: ${n} дней.`, 'bot');
-        return;
-      }
-    }
-
-   const looksLikeName =
-  /^[\wА-Яа-яЁё\s.,!()\-–—]{2,40}$/.test(text) &&   // имя 2–40 символов
-  !/дн|дней|day|days/i.test(text);                  // не похоже на “дни”
-    if(looksLikeName){
-      const h = createHabit(text);
-      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
-      state.pending = { type:'duration', habitId: h.id }; saveState(state);
-      return;
-    }
-
-    if(!state.habits || state.habits.length===0){
-      pushMsg('Что добавить в привычки? Просто напиши короткое название, например: «Пить воду».', 'bot');
-      state.pending = { type:'name' }; saveState(state);
-    } else {
-      pushMsg('Напиши название привычки, которую добавить. Можно сразу указать срок: «Пить воду 30».', 'bot');
-      state.pending = { type:'name' }; saveState(state);
-    }
-  }
 
   function send(){
     const t = (chatInput?.value||'').trim();
