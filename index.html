@@ -819,15 +819,22 @@ let askedCustom = false;
 
     // === 1.5 Клиентский «авто-допрос»: задаём точные вопросы по недостающим данным ===
 try {
-  // Что уже извлечено сервером
-  const ex = norm?.extracted || {};
+ // ==== что уже извлечено сервером ====
+const ex   = norm?.extracted || {};
+const miss = Array.isArray(norm?.missing) ? new Set(norm.missing) : new Set();
 
-  // Нужные поля
-  const needHabit    = !ex.habit || String(ex.habit).trim().length < 2;
-  const needDuration = !Number.isFinite(ex.duration_days) || ex.duration_days < 30; // минимум 30
-  const needLevel    = (typeof ex.current_level === 'undefined') &&
-                       (typeof ex.current_amount === 'undefined') &&
-                       (typeof ex.smoke_per_day === 'undefined'); // любые твои поля уровня
+// ==== что ещё нужно спросить ====
+const needHabit    = miss.has('habit') || !ex.habit || String(ex.habit).trim().length < 2;
+const needGoal     = miss.has('goal')  || !ex.goal  || !/\d/.test(String(ex.goal || ''));
+const needDuration = miss.has('duration_days') || !Number.isFinite(ex.duration_days) || ex.duration_days < 30; // минимум 30
+const needLevel    = miss.has('current_level')
+                  || (typeof ex.current_level === 'undefined'
+                   && typeof ex.current_amount === 'undefined'
+                   && typeof ex.smoke_per_day === 'undefined');
+
+// Покажем только один вопрос за раз
+let askedCustom = false;
+
 
   // Если сервер в режиме asking или где-то не хватает — спросим сами
   if (norm?.status === 'asking' || needHabit || needDuration || needLevel) {
@@ -843,7 +850,7 @@ try {
       saveState(state);
       return; // ждём ответ пользователя
     }
-    const needGoal = !ex.goal || String(ex.goal).trim().length < 1 || !/\d/.test(String(ex.goal));
+   
 
 if (needGoal) {
   pushMsg(
@@ -854,12 +861,7 @@ if (needGoal) {
   saveState(state);
   return;
 }
-    // подсказки от сервера (если есть)
-const ex = norm?.extracted || {};
-const miss = Array.isArray(norm?.missing) ? new Set(norm.missing) : new Set();
-
-// наша логика «что не хватает»
-const needGoal = miss.has('goal') || !ex.goal || !/\d/.test(String(ex.goal||'')); 
+    
 
 if (needHabit) {
   pushMsg(
