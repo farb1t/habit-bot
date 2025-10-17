@@ -847,13 +847,14 @@ if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
     state.currentHabitId = h.id;
   }
 
-  // 3.2 кладём план
-  h.plan = norm.plan
-    .map(it => ({
-      day: Number.isFinite(it?.day) ? (it.day | 0) : 0,
-      text: String(it?.text || '').slice(0, 160)
-    }))
-    .filter(p => p.text);
+  // 3.2 кладём план (нормализуем любые форматы)
+h.plan = norm.plan
+  .map((item, idx) => ({
+    day: Number.isFinite(item?.day) ? (item.day | 0) : (idx + 1),           // дефолт — порядковый день
+    text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0, 160)
+  }))
+  .filter(p => p.text);
+
 
   h.planGeneratedAt = Date.now();
   if (!Number.isFinite(h.targetDays)) h.targetDays = h.plan.length;
