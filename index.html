@@ -837,37 +837,57 @@ if (norm?.extracted) {
   }
 }
 
-// 3) Если план готов — сохраняем в привычку (НЕ в чат)
+// 3) Если план готов — СРАЗУ сохраняем его в новую/текущую привычку
 if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
-  // 3.1 выбираем/создаём привычку
-  let h = state.currentHabitId ? state.habits.find(x => x.id === state.currentHabitId) : null;
-  if (!h) h = ensureCurrentHabitFromExtracted(norm.extracted || {});
-  if (!h) {                               // фоллбек, если extracted нет
-    h = createHabit('Новая привычка');
-    state.currentHabitId = h.id;
+  console.log('[READY] План получен:', norm.plan.length);
+
+  // 3.1 всегда берём текущую или создаём новую (без зависимости от extracted)
+  let h = null;
+
+  // если явно выбрана какая-то привычка — используем её
+  if (state.currentHabitId) {
+    h = state.habits.find(x => x.id === state.currentHabitId) || null;
   }
 
-  // 3.2 кладём план (нормализуем любые форматы)
-h.plan = norm.plan
-  .map((item, idx) => ({
-    day: Number.isFinite(item?.day) ? (item.day | 0) : (idx + 1),           // дефолт — порядковый день
-    text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0, 160)
-  }))
-  .filter(p => p.text);
+  // если нет — создаём новую с осмысленным именем из первого пункта плана
+  if (!h) {
+    const firstText = (typeof norm.plan[0] === 'string'
+      ? norm.plan[0]
+      : String(norm.plan[0]?.text || 'Новая привычка')
+    ).slice(0, 30);
 
+    h = createHabit(firstText || 'Новая привычка');
+    state.currentHabitId = h.id;
+    console.log('[READY] Создали новую привычку:', h.id, h.name);
+  }
+
+  // 3.2 нормализуем и кладём план
+  h.plan = norm.plan
+    .map((item, idx) => ({
+      day: Number.isFinite(item?.day) ? (item.day | 0) : (idx + 1),
+      text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0, 160)
+    }))
+    .filter(p => p.text);
 
   h.planGeneratedAt = Date.now();
-  if (!Number.isFinite(h.targetDays)) h.targetDays = h.plan.length;
+
+  // срок = длине плана (жёстко поднимем, если раньше стояла 1)
+  if (!Number.isFinite(h.targetDays) || h.targetDays < h.plan.length) {
+    h.targetDays = h.plan.length;
+  }
 
   saveState(state);
-  renderAll();  // ОБЯЗАТЕЛЬНО: чтобы «Задания» перерисовались
+  console.log('[READY] Сохранили план:', h.name, 'дней=', h.plan.length, 'targetDays=', h.targetDays);
 
-  // 3.3 короткое уведомление, если сервер его не прислал
-  if (!Array.isArray(msgs) || msgs.length === 0) {
-    pushMsg('План готов — добавлю его в календарь. Хочешь советы по закреплению?', 'bot');
-  }
+  renderAll();
   showView('view-habit');
+
+  // короткое уведомление, если бот ничего не прислал в чат
+  if (!Array.isArray(msgs) || msgs.length === 0) {
+    pushMsg('План готов — добавил его в календарь. Хочешь советы по закреплению?', 'bot');
+  }
 }
+
 
 // 4) Если сервер вернул ошибку
 if (norm?.error) {
