@@ -437,6 +437,15 @@ body.kb-open nav.bottom{
 
   window.state = loadState();
   if(!('pending' in state)) state.pending = null;
+  // ❱❱ для пошагового сценария 1→5
+state.tmpPlan = state.tmpPlan || {
+  habit: '',          // название
+  goal: '',           // цель с числом и еденицей
+  current_level: '',  // текущий уровень
+  duration_days: null // срок (целое число)
+};
+saveState(state);
+
 
   // Показать приветствие один раз при первом запуске
   if (!state.__welcomed) {
@@ -807,111 +816,57 @@ async function talkToApi() {
 
     // Нормализация формата (строка → объект; choices → content)
     let norm = data;
+    
     if (typeof norm === 'string') {
       try { norm = JSON.parse(norm); } catch {}
     }
     if (norm && norm.choices && norm.choices[0]?.message?.content) {
       try { norm = JSON.parse(norm.choices[0].message.content); } catch {}
     }
-
-// общий вопрос будем показывать только если мы НЕ задали свой уточняющий
-let askedCustom = false;
-
-    // === 1.5 Клиентский «авто-допрос»: задаём точные вопросы по недостающим данным ===
-try {
- // ==== что уже извлечено сервером ====
-const ex   = norm?.extracted || {};
-const miss = Array.isArray(norm?.missing) ? new Set(norm.missing) : new Set();
-
-// ==== что ещё нужно спросить ====
-const needHabit    = miss.has('habit') || !ex.habit || String(ex.habit).trim().length < 2;
-const needGoal     = miss.has('goal')  || !ex.goal  || !/\d/.test(String(ex.goal || ''));
-const needDuration = miss.has('duration_days') || !Number.isFinite(ex.duration_days) || ex.duration_days < 30; // минимум 30
-const needLevel    = miss.has('current_level')
-                  || (typeof ex.current_level === 'undefined'
-                   && typeof ex.current_amount === 'undefined'
-                   && typeof ex.smoke_per_day === 'undefined');
-
-// Покажем только один вопрос за раз
-let askedCustom = false;
+    // --- анти-дубликатор вопросов ассистента ---
+function askOnce(type, text) {
+  if (state.pending && state.pending.type === type) return false;
+  const lastBot = [...(state.chat || [])].reverse().find(m => m.role === 'assistant');
+  if (lastBot && lastBot.content.trim() === String(text).trim()) return false;
+  pushMsg(text, 'bot');
+  state.pending = { type, habitId: state.currentHabitId || null, askedAt: Date.now() };
+  saveState(state);
+  return true;
+}
 
 
-  // Если сервер в режиме asking или где-то не хватает — спросим сами
-  if (norm?.status === 'asking' || needHabit || needDuration || needLevel) {
+// --- подтягиваем извлечённое в tmpPlan ---
+const ex = norm?.extracted || {};
+if (ex.habit) state.tmpPlan.habit = String(ex.habit).trim();
+if (ex.goal)  state.tmpPlan.goal  = String(ex.goal).trim();
+if (ex.current_level || ex.current_amount || ex.smoke_per_day) {
+  state.tmpPlan.current_level = String(ex.current_level ?? ex.current_amount ?? ex.smoke_per_day).trim();
+}
+if (Number.isFinite(ex.duration_days)) {
+  state.tmpPlan.duration_days = Math.max(1, Math.min(365, ex.duration_days|0));
+}
+saveState(state);
 
-    // приоритезируем: название → срок → уровень
-    if (needHabit) {
-      pushMsg(
-        'Как назовём привычку? Напиши в измеримых единицах и со сроком типа: «пить воду 2000 мл в день 30 дней» или сначала название: «пить воду 2000 мл в день».',
-        'bot'
-      );
-      // помечаем, что ждём имя
-      state.pending = { type: 'name' };
-      saveState(state);
-      return; // ждём ответ пользователя
-    }
-   
+// --- определяем, чего не хватает ---
+const needName     = !(state.tmpPlan.habit && state.tmpPlan.habit.trim().length >= 2);
+const needGoal     = !(state.tmpPlan.goal  && /\d/.test(state.tmpPlan.goal));
+const needLevel    = !(state.tmpPlan.current_level && state.tmpPlan.current_level.trim().length >= 1);
+const needDuration = !(Number.isFinite(state.tmpPlan.duration_days) && state.tmpPlan.duration_days >= 30);
 
+// --- спрашиваем строго в порядке: name → goal → level → duration ---
+if (needName) {
+  if (askOnce('name', 'Как назовём привычку? Коротко — то, что будет видно во вкладке «Задания».')) return;
+}
 if (needGoal) {
-  pushMsg(
-    'Какая у тебя конкретная цель? Укажи измеримую единицу: например «читать 20 страниц», «бегать 3 км», «пить 2000 мл воды».',
-    'bot'
-  );
-  state.pending = { type: 'goal', habitId: state.currentHabitId || null };
-  saveState(state);
-  return;
+  if (askOnce('goal', 'Какая у тебя конкретная цель? Укажи число и единицу: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».')) return;
 }
-    
-
-if (needHabit) {
-  pushMsg(
-    'Как назовём привычку? Напиши в измеримых единицах, напр.: «пить воду 2000 мл в день 30 дней» или сначала название: «пить воду 2000 мл в день».',
-    'bot'
-  );
-  state.pending = { type: 'name' };
-  saveState(state);
-  askedCustom = true;
-  return;
-}
-
-if (needGoal) {
-  pushMsg(
-    'Какая у тебя конкретная цель? Укажи измеримую единицу: «читать 20 страниц», «бегать 3 км», «пить 2000 мл воды».',
-    'bot'
-  );
-  state.pending = { type: 'goal', habitId: state.currentHabitId || null };
-  saveState(state);
-  askedCustom = true;
-  return;
-}
-
-if (needDuration) {
-  pushMsg(
-    'На сколько дней берём? Минимум 30. Для отказа от вредных — лучше от 60. Напиши просто число, напр.: 30.',
-    'bot'
-  );
-  state.pending = { type: 'duration', habitId: state.currentHabitId || null };
-  saveState(state);
-  askedCustom = true;
-  return;
-}
-
 if (needLevel) {
-  pushMsg(
-    'Сколько ты делаешь сейчас? Пример: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет в день».',
-    'bot'
-  );
-  state.pending = { type: 'level', habitId: state.currentHabitId || null };
-  saveState(state);
-  askedCustom = true;
-  return;
+  if (askOnce('level', 'Сколько ты делаешь сейчас? Например: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет в день».')) return;
 }
-  }
-} catch (e) { /* no-op */ }
-    // Если сервер просит уточнить, а мы свой вопрос не задали — покажем общий
-if (!askedCustom && norm?.status === 'asking' && (!Array.isArray(msgs) || msgs.length === 0)) {
-  pushMsg('Сформулируй, пожалуйста, привычку с числом и укажи срок.', 'bot');
+if (needDuration) {
+  if (askOnce('duration', 'На сколько дней берём срок? Минимум 30. Напиши число, например: 30.')) return;
 }
+// сюда попадём только когда всё собрано → сервер уже может прислать ready
 
 
 
@@ -925,56 +880,60 @@ if (norm?.extracted) {
   }
 }
 
-// 3) Если план готов — СРАЗУ сохраняем его в новую/текущую привычку
+// === 3) ПРИШЁЛ ГОТОВЫЙ ПЛАН ===
 if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length) {
   console.log('[READY] План получен:', norm.plan.length);
 
-  // 3.1 всегда берём текущую или создаём новую (без зависимости от extracted)
-  let h = null;
+  // сообщения бота (если сервер не прислал, покажем короткое уведомление сами)
+  const msgs = Array.isArray(norm.assistant_messages) ? norm.assistant_messages : [];
 
-  // если явно выбрана какая-то привычка — используем её
-  if (state.currentHabitId) {
-    h = state.habits.find(x => x.id === state.currentHabitId) || null;
-  }
-
-  // если нет — создаём новую с осмысленным именем из первого пункта плана
+  // a) берём текущую привычку или создаём новую
+  let h = state.habits.find(x => x.id === state.currentHabitId) || null;
   if (!h) {
-    const firstText = (typeof norm.plan[0] === 'string'
-      ? norm.plan[0]
-      : String(norm.plan[0]?.text || 'Новая привычка')
-    ).slice(0, 30);
+    const firstText = (
+      typeof norm.plan[0] === 'string'
+        ? norm.plan[0]
+        : String(norm.plan[0]?.text || state.tmpPlan?.habit || 'Новая привычка')
+    ).slice(0, 50);
 
     h = createHabit(firstText || 'Новая привычка');
     state.currentHabitId = h.id;
     console.log('[READY] Создали новую привычку:', h.id, h.name);
   }
 
-  // 3.2 нормализуем и кладём план
+  // b) нормализуем план
   h.plan = norm.plan
     .map((item, idx) => ({
       day: Number.isFinite(item?.day) ? (item.day | 0) : (idx + 1),
-      text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0, 160)
+      text: String(item?.text ?? item ?? '').slice(0, 160)
     }))
     .filter(p => p.text);
 
-  h.planGeneratedAt = Date.now();
-
-  // срок = длине плана (жёстко поднимем, если раньше стояла 1)
+  // c) срок = длине плана (если был меньше — поднимем)
   if (!Number.isFinite(h.targetDays) || h.targetDays < h.plan.length) {
     h.targetDays = h.plan.length;
   }
+  h.planGeneratedAt = Date.now();
 
+  // d) сохранить и показать во вкладке «Задания»
   saveState(state);
   console.log('[READY] Сохранили план:', h.name, 'дней=', h.plan.length, 'targetDays=', h.targetDays);
-
   renderAll();
   showView('view-habit');
 
-  // короткое уведомление, если бот ничего не прислал в чат
-  if (!Array.isArray(msgs) || msgs.length === 0) {
-    pushMsg('План готов — добавил его в календарь. Хочешь советы по закреплению?', 'bot');
+  // e) короткое подтверждение, если сервер его не прислал
+  if (!msgs.length) {
+    pushMsg('План готов — добавила его в календарь. Нужны советы по закреплению?', 'bot');
   }
+
+  // f) очистить временные поля, если используешь
+  state.tmpPlan = { habit: '', goal: '', current_level: '', duration_days: null };
+  saveState(state);
+
+  // важно: выходим, чтобы ниже код не продолжал выполнение
+  return;
 }
+
 
 
 // 4) Если сервер вернул ошибку
@@ -1026,60 +985,67 @@ if (norm?.error) {
 
   function botReply(q){
     const text = q.trim();
-
-    // If we're waiting for duration, prioritize that flow
-    if(state.pending && state.pending.type==='duration' && state.pending.habitId){
-      const num = (text.match(/(\d{1,3})/)||[])[1];
-      if(num){
-        const n = Math.max(1, Math.min(365, parseInt(num,10)));
-        const h = state.habits.find(x=>x.id===state.pending.habitId);
-        if(h){ h.targetDays = n; saveState(state); renderAll(); }
-        pushMsg(`Отлично, ставлю срок: ${n} дней.`, 'bot');
-        state.pending = null; saveState(state);
-        showView('view-habit');
-        return;
-      } else {
-        pushMsg('Напиши число дней, например: 30', 'bot');
-        return;
-      }
-    }
-    // pending: goal (конкретная измеримая цель)
-if (state.pending && state.pending.type === 'goal') {
-  const goalText = text.trim();
-  if (!goalText) {
-    pushMsg('Укажи цель в измеримых единицах: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
+    // ===== пошаговый сценарий: принимаем ответы на вопросы =====
+if (state.pending && state.pending.type === 'name') {
+  const name = text.trim();
+  if (name.length < 2 || name.length > 50) {
+    pushMsg('Нужно короткое понятное название (2–50 символов). Попробуй ещё раз.', 'bot');
     return;
   }
-
-  // найдём/создадим привычку-приёмник
-  let h = state.currentHabitId
-    ? (state.habits.find(x => x.id === state.currentHabitId) || null)
-    : null;
-  if (!h) {
-    h = createHabit('Новая привычка');
-    state.currentHabitId = h.id;
-  }
-
-  // сохраняем цель
-  h.goal = goalText;
-  saveState(state);
-  renderAll();
-
-  pushMsg(`Приняла цель: ${goalText}.`, 'bot');
-  state.pending = null;
-  saveState(state);
-
-  // если ещё нет срока — спросим его
-  if (!Number.isFinite(h.targetDays)) {
-    pushMsg('Теперь укажи срок (в днях). Минимум 30. Напиши просто число, например: 30.', 'bot');
-    state.pending = { type: 'duration', habitId: h.id };
-    saveState(state);
-  } else {
-    // цель и срок уже есть — можно просить план у API
-    talkToApi();
-  }
+  state.tmpPlan.habit = name;
+  state.pending = null; saveState(state);
+  pushMsg(`Ок, название: «${name}».`, 'bot');
+  talkToApi();
   return;
 }
+
+if (state.pending && state.pending.type === 'goal') {
+  const t = text.trim();
+  if (!/\d/.test(t)) {
+    pushMsg('Добавь число и единицу измерения: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».', 'bot');
+    return;
+  }
+  state.tmpPlan.goal = t;
+  state.pending = null; saveState(state);
+  pushMsg(`Цель приняла: ${t}.`, 'bot');
+  talkToApi();
+  return;
+}
+
+if (state.pending && state.pending.type === 'level') {
+  const t = text.trim();
+  if (t.length < 1) {
+    pushMsg('Опиши, сколько делаешь сейчас. Примеры: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет».', 'bot');
+    return;
+  }
+  state.tmpPlan.current_level = t;
+  state.pending = null; saveState(state);
+  pushMsg(`Записала текущий уровень: ${t}.`, 'bot');
+  talkToApi();
+  return;
+}
+
+if (state.pending && state.pending.type === 'duration') {
+  const m = text.match(/(\d{1,3})/);
+  if (!m) {
+    pushMsg('Напиши просто число дней. Минимум 30. Например: 30.', 'bot');
+    return;
+  }
+  const days = Math.max(1, Math.min(365, parseInt(m[1],10)));
+  if (days < 30) {
+    pushMsg('Маловато для устойчивой привычки. Давай хотя бы 30–60 дней. Напиши число, например: 60.', 'bot');
+    return;
+  }
+  state.tmpPlan.duration_days = days;
+  state.pending = null; saveState(state);
+  pushMsg(`Срок записала: ${days} дней.`, 'bot');
+  talkToApi();
+  return;
+}
+// ===== конец блока обработчиков =====
+
+
+
 
 
     // New: try to parse full intent from a single message
