@@ -853,20 +853,37 @@ const needGoal     = !(state.tmpPlan.goal  && /\d/.test(state.tmpPlan.goal));
 const needLevel    = !(state.tmpPlan.current_level && state.tmpPlan.current_level.trim().length >= 1);
 const needDuration = !(Number.isFinite(state.tmpPlan.duration_days) && state.tmpPlan.duration_days >= 30);
 
-// --- спрашиваем строго в порядке: name → goal → level → duration ---
+
+// === СПРАШИВАЕМ СТРОГО ПО ПОРЯДКУ: name → goal → level → duration ===
 if (needName) {
   if (askOnce('name', 'Как назовём привычку? Коротко — то, что будет видно во вкладке «Задания».')) return;
+  state.pending = { type: 'name' };
+  saveState(state);
+  return;
 }
+
 if (needGoal) {
   if (askOnce('goal', 'Какая у тебя конкретная цель? Укажи число и единицу: «читать 20 страниц», «пить 2000 мл», «бегать 3 км».')) return;
+  state.pending = { type: 'goal', habitId: state.currentHabitId || null };
+  saveState(state);
+  return;
 }
+
 if (needLevel) {
   if (askOnce('level', 'Сколько ты делаешь сейчас? Например: «пью 500 мл», «читаю 10 страниц», «курю 5 сигарет в день».')) return;
+  state.pending = { type: 'level', habitId: state.currentHabitId || null };
+  saveState(state);
+  return;
 }
+
 if (needDuration) {
   if (askOnce('duration', 'На сколько дней берём срок? Минимум 30. Напиши число, например: 30.')) return;
+  state.pending = { type: 'duration', habitId: state.currentHabitId || null };
+  saveState(state);
+  return;
 }
-// сюда попадём только когда всё собрано → сервер уже может прислать ready
+
+// сюда попадём только когда всё собрано — сервер уже может прислать ready
 
 
 
