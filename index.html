@@ -1211,7 +1211,9 @@ if (state.pending && state.pending.type === 'level') {
       }
     }
 
-    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(text) && !/дн|дней|day|days/i.test(text);
+   const looksLikeName =
+  /^[\wА-Яа-яЁё\s.,!()\-–—]{2,40}$/.test(text) &&   // имя 2–40 символов
+  !/дн|дней|day|days/i.test(text);                  // не похоже на “дни”
     if(looksLikeName){
       const h = createHabit(text);
       pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
