@@ -1122,23 +1122,19 @@ const chatInput2 = document.querySelector('.chat-input');
 const sendBtn = document.querySelector('.-btn');
 
 
- function send() {
-  const t = (chatInput2.value || '').trim();
-  if (!t) return;
+ function send(){
+    const t = (chatInput?.value||'').trim();
+    if(!t) return;
+    pushMsg(t, 'you'); // сначала пишем в историю/чат
+    chatInput.value='';
+    talkToApi();       // затем дергаем API, оно пришлет ВСЕ промежуточные ответы
+  }
+  sendBtn?.addEventListener('click', send);
+  chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
 
-  pushMsg(t, 'you'); // пишем в чат как сообщение пользователя
-  chatInput2.value = ''; // очищаем поле
-
-  // 🔹 вызываем не API, а свой локальный обработчик
-  botReply(t);
-}
-
-  // Навешиваем события
-sendBtn.addEventListener('click', send);
-chatInput2.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') send();
-});
-
+  
+  
+  
   // Avatar upload handler
   if(avatarLabel && avatarInput){
     avatarLabel.addEventListener('click', ()=> avatarInput.click());
