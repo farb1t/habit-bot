@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+А<!DOCTYPE html>
 <html lang="ru">
 <!-- === MOBILE ADAPTATION === -->
 <meta name="theme-color" content="#0b0c0f">
@@ -423,7 +423,7 @@ body.kb-open nav.bottom{
   const trashPanel = document.getElementById('trash-panel');
   const trashList = document.getElementById('trash-list');
 
-  const Btn = document.getElementById('send-btn');
+
   const chatInput = document.getElementById('chat-input');
   const messages = document.getElementById('messages');
 
@@ -1119,18 +1119,22 @@ function botReply(q) {
   }
 }
 
-const sendBtn = document.querySelector('send-btn');
+const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
 
+function send() {
+  const t = (chatInput?.value || '').trim();
+  if (!t) return;
+  pushMsg(t, 'you'); // сначала добавляем в чат
+  chatInput.value = '';
+  talkToApi();       // вызываем API
+}
 
- function send(){
-    const t = (chatInput?.value||'').trim();
-    if(!t) return;
-    pushMsg(t, 'you'); // сначала пишем в историю/чат
-    chatInput.value='';
-    talkToApi();       // затем дергаем API, оно пришлет ВСЕ промежуточные ответы
-  }
-  sendBtn?.addEventListener('click', send);
-  chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
+sendBtn?.addEventListener('click', send);
+chatInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') send();
+});
+
 
   
   
