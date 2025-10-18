@@ -327,7 +327,7 @@ body.kb-open nav.bottom{
         <div class="messages" id="messages"></div>
         <div class="chat-input">
           <input autocomplete="off" id="chat-input" placeholder="Напишите сообщение..." type="text"/>
-          <button class="icon-btn" id="send-btn">Отправить</button>
+          <button class="icon-btn" id="-btn">Отправить</button>
         </div>
       </div>
       <div class="habit-card" id="trash-panel-chat" style="margin-top:12px; display:none;">
@@ -423,7 +423,7 @@ body.kb-open nav.bottom{
   const trashPanel = document.getElementById('trash-panel');
   const trashList = document.getElementById('trash-list');
 
-  const sendBtn = document.getElementById('send-btn');
+  const Btn = document.getElementById('send-btn');
   const chatInput = document.getElementById('chat-input');
   const messages = document.getElementById('messages');
 
@@ -1120,13 +1120,17 @@ function botReply(q) {
 }
 
 
-  function send(){
-    const t = (chatInput?.value||'').trim();
-    if(!t) return;
-    pushMsg(t, 'you'); // сначала пишем в историю/чат
-    chatInput.value='';
-    talkToApi();       // затем дергаем API, оно пришлет ВСЕ промежуточные ответы
-  }
+ function send() {
+  const t = (chatInput2.value || '').trim();
+  if (!t) return;
+
+  pushMsg(t, 'you'); // пишем в чат как сообщение пользователя
+  chatInput2.value = ''; // очищаем поле
+
+  // 🔹 вызываем не API, а свой локальный обработчик
+  botReply(t);
+}
+
   sendBtn?.addEventListener('click', send);
   chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
 
