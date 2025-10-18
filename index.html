@@ -1118,6 +1118,8 @@ function botReply(q) {
     return;
   }
 }
+const chatInput2 = document.querySelector('.chat-input');
+const sendBtn = document.querySelector('.-btn');
 
 
  function send() {
@@ -1131,9 +1133,11 @@ function botReply(q) {
   botReply(t);
 }
 
-  sendBtn?.addEventListener('click', send);
-  chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
-
+  // Навешиваем события
+sendBtn.addEventListener('click', send);
+chatInput2.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') send();
+});
 
   // Avatar upload handler
   if(avatarLabel && avatarInput){
