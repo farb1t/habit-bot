@@ -327,7 +327,7 @@ body.kb-open nav.bottom{
         <div class="messages" id="messages"></div>
         <div class="chat-input">
           <input autocomplete="off" id="chat-input" placeholder="Напишите сообщение..." type="text"/>
-          <button class="icon-btn" id="-btn">Отправить</button>
+          <button class="icon-btn" id="send-btn">Отправить</button>
         </div>
       </div>
       <div class="habit-card" id="trash-panel-chat" style="margin-top:12px; display:none;">
@@ -1118,8 +1118,8 @@ function botReply(q) {
     return;
   }
 }
-const chatInput2 = document.querySelector('.chat-input');
-const sendBtn = document.querySelector('.-btn');
+
+const sendBtn = document.querySelector('send-btn');
 
 
  function send(){
