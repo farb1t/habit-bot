@@ -1040,6 +1040,50 @@ try {
 })();
 
 })(); // ← IIFE закрыта
+  // === Надёжная отправка: один клик/Enter = один запрос, без «пропаданий» слушателя ===
+(function wireChatSend(){
+  // универсальный обработчик
+  async function sendOnce(){
+    const input = document.getElementById('chat-input');
+    const text = (input?.value || '').trim();
+    if (!text) return;
+
+    // антидубль (если нажали и клик, и Enter)
+    if (window.__sending) return;
+    window.__sending = true;
+
+    try {
+      pushMsg(text, 'you');
+      input.value = '';
+      // обязательно ждём, чтобы __sending снялся в finally
+      await talkToApi();
+    } catch (err) {
+      console.error('sendOnce error:', err);
+    } finally {
+      window.__sending = false;
+    }
+  }
+  window.sendOnce = sendOnce; // чтобы можно было дернуть из консоли
+
+  // 1) Делегирование клика — даже если кнопку перерисуют/клонят, обработчик останется.
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('#send-btn');
+    if (!btn) return;
+    e.preventDefault();
+    sendOnce();
+  }, { passive: false });
+
+  // 2) Enter в поле ввода
+  document.addEventListener('keydown', (e)=>{
+    if (e.key !== 'Enter') return;
+    const el = e.target;
+    if (el && el.id === 'chat-input') {
+      e.preventDefault();
+      sendOnce();
+    }
+  }, { passive: false });
+})();
+
 </script>
 
 <style>.bottom *{pointer-events:auto !important;}</style>
