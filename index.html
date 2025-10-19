@@ -794,78 +794,51 @@ async function talkToApi(){
     });
 
     const data = await res.json();
+    console.log('[API /chat] raw:', data);
 
-    // Нормализация формата (строка → объект; choices → content)
     let norm = data;
-    if (typeof norm === 'string') {
-      try { norm = JSON.parse(norm); } catch {}
-    }
+    if (typeof norm === 'string') { try { norm = JSON.parse(norm); } catch{} }
     if (norm && norm.choices && norm.choices[0]?.message?.content) {
-      try { norm = JSON.parse(norm.choices[0].message.content); } catch {}
+      try { norm = JSON.parse(norm.choices[0].message.content); } catch{}
+    }
+    console.log('[API /chat] norm:', norm);
+
+    // 1) ответы ассистента (любой формат), кроме этапа генерации плана
+    let assistantMsgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages.slice() : [];
+    const single =
+      norm?.reply ?? norm?.message ?? norm?.content ?? norm?.output?.text ?? norm?.text ??
+      (norm?.choices && norm.choices[0]?.message?.content) ??
+      (typeof norm === 'string' ? norm : null);
+    if (!assistantMsgs.length && single) assistantMsgs = [String(single)];
+
+    const isGenerating = /^(generating|planning|creating(_plan)?)$/i.test(String(norm?.status || ''));
+    if (!isGenerating) {
+      for (const m of assistantMsgs) pushMsg(String(m), 'bot');
     }
 
-    // 1) ВСЕГДА показать все сообщения ассистента из API
-    const msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages : [];
-    if (msgs.length){
-      const lastBot = [...(state.chat || [])].reverse().find(m => m.role === 'assistant');
-      for (const msg of msgs){
-        if (!lastBot || lastBot.content.trim() !== String(msg).trim()) {
-          pushMsg(msg, 'bot');
-        }
-      }
-    }  else {
-  // === ФОЛЛБЭКЫ НА ДРУГИЕ ФОРМАТЫ ===
-  const fallback =
-    norm?.reply ??
-    norm?.message ??
-    norm?.content ??
-    norm?.output?.text ??
-    norm?.text ??
-    (typeof norm === 'string' ? norm : null);
-
-  if (fallback) {
-    pushMsg(String(fallback), 'bot');
-  }
-}
-
-    // 2) Если план готов — МОЛЧА внедрить его во вкладку «Задания» (не постить в чат)
+    // 2) внедрение плана — тихо, только во вкладку «Задания»
     if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length){
-      // имя привычки — из extracted.habit или из первого элемента плана
       const baseName = (norm?.extracted?.habit || '').trim();
-      const firstText = (typeof norm.plan[0] === 'string'
-        ? norm.plan[0]
-        : String(norm.plan[0]?.text || '')
-      ).slice(0, 30);
+      const firstText = (typeof norm.plan[0] === 'string' ? norm.plan[0] : String(norm.plan[0]?.text || '')).slice(0, 30);
       const habitName = baseName || firstText || 'Новая привычка';
 
-      // всегда СОЗДАЁМ НОВУЮ привычку
       const h = createHabit(habitName);
       state.currentHabitId = h.id;
-
-      // срок — из extracted.duration_days или длины плана
       const target = Number(norm?.extracted?.duration_days) || norm.plan.length;
       h.targetDays = Math.max(1, Math.min(365, target|0));
 
-      // нормализация плана
-      h.plan = norm.plan
-        .map((item, idx) => ({
-          day: Number.isFinite(item?.day) ? (item.day | 0) : (idx + 1),
-          text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0, 160)
-        }))
-        .filter(p => p.text);
+      h.plan = norm.plan.map((item, idx)=>({
+        day: Number.isFinite(item?.day) ? (item.day|0) : (idx+1),
+        text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0,160)
+      })).filter(p=>p.text);
 
       h.planGeneratedAt = Date.now();
-
       saveState(state);
       renderAll();
-      showView('view-habit');       // переключаемся на «Задания»
-      // ВНИМАНИЕ: НИЧЕГО про план в чат не отправляем.
+      showView('view-habit');
     }
 
-    // 3) Обработка ошибок
-    if (norm?.error){
-      pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
-    }
+    if (norm?.error) pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
   }catch(e){
     console.error(e);
     pushMsg('Не получилось связаться с сервером. Попробуем ещё раз?', 'bot');
