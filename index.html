@@ -784,7 +784,7 @@ if (Number.isFinite(extracted.duration_days)) {
 return h;
 }
 
-// === PATCH: talkToApi() — только API, без локального сценария ===
+// === API-чат: ответы печатаем, план внедряем молча в «Задания» ===
 async function talkToApi(){
   try{
     const res = await fetch(API_BASE, {
@@ -796,6 +796,7 @@ async function talkToApi(){
     const data = await res.json();
     console.log('[API /chat] raw:', data);
 
+    // Нормализация форматов
     let norm = data;
     if (typeof norm === 'string') { try { norm = JSON.parse(norm); } catch{} }
     if (norm && norm.choices && norm.choices[0]?.message?.content) {
@@ -803,42 +804,66 @@ async function talkToApi(){
     }
     console.log('[API /chat] norm:', norm);
 
-    // 1) ответы ассистента (любой формат), кроме этапа генерации плана
-    let assistantMsgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages.slice() : [];
+    // 1) Показать ответ ассистента в ЛЮБОМ распространённом формате
+    let msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages.slice() : [];
+
     const single =
-      norm?.reply ?? norm?.message ?? norm?.content ?? norm?.output?.text ?? norm?.text ??
+      norm?.reply ??
+      norm?.message ??
+      norm?.content ??
+      norm?.output?.text ??
+      norm?.text ??
       (norm?.choices && norm.choices[0]?.message?.content) ??
       (typeof norm === 'string' ? norm : null);
-    if (!assistantMsgs.length && single) assistantMsgs = [String(single)];
 
+    if (!msgs.length && single) msgs = [String(single)];
+
+    // не печатаем «шум» во время генерации плана (если бэк так помечает)
     const isGenerating = /^(generating|planning|creating(_plan)?)$/i.test(String(norm?.status || ''));
+
+    // простой анти-дубликатор: не печатать ту же строку дважды подряд
+    const lastBot = [...(state.chat || [])].reverse().find(m => m.role === 'assistant');
+    const lastText = lastBot?.content?.trim() || '';
+
     if (!isGenerating) {
-      for (const m of assistantMsgs) pushMsg(String(m), 'bot');
+      for (const m of msgs) {
+        const s = String(m).trim();
+        if (s && s !== lastText) pushMsg(s, 'bot');
+      }
     }
 
-    // 2) внедрение плана — тихо, только во вкладку «Задания»
+    // 2) План готов — внедряем в «Задания» (создаём НОВУЮ привычку), в чат НЕ шлём текст плана
     if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length){
       const baseName = (norm?.extracted?.habit || '').trim();
-      const firstText = (typeof norm.plan[0] === 'string' ? norm.plan[0] : String(norm.plan[0]?.text || '')).slice(0, 30);
+      const firstText = (typeof norm.plan[0] === 'string'
+        ? norm.plan[0]
+        : String(norm.plan[0]?.text || '')
+      ).slice(0, 30);
       const habitName = baseName || firstText || 'Новая привычка';
 
       const h = createHabit(habitName);
       state.currentHabitId = h.id;
+
       const target = Number(norm?.extracted?.duration_days) || norm.plan.length;
       h.targetDays = Math.max(1, Math.min(365, target|0));
 
-      h.plan = norm.plan.map((item, idx)=>({
-        day: Number.isFinite(item?.day) ? (item.day|0) : (idx+1),
-        text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0,160)
-      })).filter(p=>p.text);
+      h.plan = norm.plan
+        .map((item, idx) => ({
+          day: Number.isFinite(item?.day) ? (item.day|0) : (idx+1),
+          text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0,160)
+        }))
+        .filter(p => p.text);
 
       h.planGeneratedAt = Date.now();
       saveState(state);
       renderAll();
-      showView('view-habit');
+      showView('view-habit'); // показываем вкладку «Задания»
+      // В чат план НЕ отправляем.
     }
 
+    // 3) Ошибка API
     if (norm?.error) pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
+
   }catch(e){
     console.error(e);
     pushMsg('Не получилось связаться с сервером. Попробуем ещё раз?', 'bot');
@@ -851,22 +876,40 @@ async function talkToApi(){
 
 
 // === PATCH: send() → все сообщения идут в API ===
-window.send = function(){
+// === SINGLE-SEND: один вызов API на одно действие пользователя ===
+async function sendOnce(){
   const text = (chatInput?.value || '').trim();
   if (!text) return;
-  pushMsg(text, 'you');      // показать сообщение пользователя
-  chatInput.value = '';
-  talkToApi();               // сразу уходим в API, без локальной логики
-};
 
-if(sendBtn){
-sendBtn.removeEventListener?.('click', send); // на всякий случай
-sendBtn.addEventListener('click', window.send);
-}
-if(chatInput){
-chatInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') window.send(); });
+  // защита от двойных вызовов (click+Enter)
+  if (window.__sending) return;
+  window.__sending = true;
+
+  try {
+    pushMsg(text, 'you');
+    chatInput.value = '';
+    await talkToApi();   // ждём один запрос к API
+  } finally {
+    window.__sending = false;
+  }
 }
 
+// Снять старые слушатели, если могли дублироваться
+try {
+  if (sendBtn && sendBtn.cloneNode) {
+    const clone = sendBtn.cloneNode(true);
+    sendBtn.parentNode.replaceChild(clone, sendBtn);
+    window.sendBtn = clone; // обновим ссылку
+  }
+} catch(e){}
+
+// Повесить РОВНО ОДИН обработчик (клик)
+sendBtn?.addEventListener('click', sendOnce);
+
+// Дополнительно: Enter в поле ввода вызывает тот же обработчик
+chatInput?.addEventListener('keydown', (e)=>{
+  if (e.key === 'Enter') sendOnce();
+});
 
 
 
