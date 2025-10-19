@@ -71,6 +71,11 @@
   }
 </style>
 <script>
+
+  // ДОЛЖНО стоять самым первым в скрипте
+globalThis.querySelector    = document.querySelector.bind(document);
+globalThis.querySelectorAll = document.querySelectorAll.bind(document);
+
   // 100dvh fix for iOS Safari: update --vh on resize/orientation
   (function(){
     function setVH(){
