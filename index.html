@@ -785,7 +785,6 @@ return h;
 }
 
 // === API-чат: ответы печатаем, план внедряем молча в «Задания» ===
-// === API-чат: ответы печатаем, план внедряем молча в «Задания» ===
 async function talkToApi(){
   try{
     const res = await fetch(API_BASE, {
@@ -797,7 +796,7 @@ async function talkToApi(){
     const data = await res.json();
     console.log('[API /chat] raw:', data);
 
-    // Нормализация форматов
+    // Нормализация форматов ответа
     let norm = data;
     if (typeof norm === 'string') { try { norm = JSON.parse(norm); } catch{} }
     if (norm && norm.choices && norm.choices[0]?.message?.content) {
@@ -808,12 +807,12 @@ async function talkToApi(){
     // === Показ ответа ассистента (любой формат) ===
     let toShow = [];
 
-    // 1) Массив сообщений
+    // 1) если пришёл массив сообщений
     if (Array.isArray(norm?.assistant_messages)) {
       toShow.push(...norm.assistant_messages.map(String));
     }
 
-    // 2) Одиночные поля (если массив не пришёл)
+    // 2) если пришло одиночное поле
     if (toShow.length === 0) {
       const single =
         norm?.reply ??
@@ -826,16 +825,15 @@ async function talkToApi(){
       if (single) toShow.push(String(single));
     }
 
-    // 3) Не печатать только во время генерации плана (список статусов под себя)
+    // 3) не печатаем только если бэк явно пометил процесс генерации плана
     const suppress = /^(generating|creating|building|planning)$/i.test(String(norm?.status || ''));
 
-    // 4) Печатаем ответы (без дедупликации)
     if (!suppress) {
       console.log('[API/chat] toShow:', toShow);
       toShow.forEach(s => { if (s.trim()) pushMsg(s.trim(), 'bot'); });
     }
 
-    // === План готов — внедряем в «Задания» (создаём НОВУЮ привычку), в чат НЕ шлём текст плана ===
+    // === План готов — добавляем как НОВУЮ привычку и показываем «Задания» ===
     if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length){
       const baseName = (norm?.extracted?.habit || '').trim();
       const firstText = (typeof norm.plan[0] === 'string'
@@ -858,10 +856,9 @@ async function talkToApi(){
       h.planGeneratedAt = Date.now();
       saveState(state);
       renderAll();
-      showView('view-habit');  // план внедрён молча
+      showView('view-habit');   // план внедрён молча — в чат его не шлём
     }
 
-    // Ошибка API
     if (norm?.error) pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
 
   }catch(e){
@@ -1085,6 +1082,7 @@ try {
     }
   }, { passive: false });
 })();
+
 
 </script>
 
