@@ -752,6 +752,9 @@ listRoot.appendChild(card);
     if (state.chat.length > 60) state.chat = state.chat.slice(-60);
     saveState(state);
   }
+  // сделать доступной для внешних обработчиков
+window.pushMsg = pushMsg;
+
   // === API: Mistral proxy на Cloudflare ===
 const API_BASE = 'https://habbitserver.konayevna.workers.dev/chat';
 
@@ -866,6 +869,7 @@ async function talkToApi(){
     pushMsg('Не получилось связаться с сервером. Попробуем ещё раз?', 'bot');
   }
 }
+window.talkToApi = talkToApi;
 
 
 
