@@ -785,6 +785,7 @@ return h;
 }
 
 // === API-чат: ответы печатаем, план внедряем молча в «Задания» ===
+// === API-чат: ответы печатаем, план внедряем молча в «Задания» ===
 async function talkToApi(){
   try{
     const res = await fetch(API_BASE, {
@@ -804,35 +805,37 @@ async function talkToApi(){
     }
     console.log('[API /chat] norm:', norm);
 
-    // 1) Показать ответ ассистента в ЛЮБОМ распространённом формате
-    let msgs = Array.isArray(norm?.assistant_messages) ? norm.assistant_messages.slice() : [];
+    // === Показ ответа ассистента (любой формат) ===
+    let toShow = [];
 
-    const single =
-      norm?.reply ??
-      norm?.message ??
-      norm?.content ??
-      norm?.output?.text ??
-      norm?.text ??
-      (norm?.choices && norm.choices[0]?.message?.content) ??
-      (typeof norm === 'string' ? norm : null);
-
-    if (!msgs.length && single) msgs = [String(single)];
-
-    // не печатаем «шум» во время генерации плана (если бэк так помечает)
-    const isGenerating = /^(generating|planning|creating(_plan)?)$/i.test(String(norm?.status || ''));
-
-    // простой анти-дубликатор: не печатать ту же строку дважды подряд
-    const lastBot = [...(state.chat || [])].reverse().find(m => m.role === 'assistant');
-    const lastText = lastBot?.content?.trim() || '';
-
-    if (!isGenerating) {
-      for (const m of msgs) {
-        const s = String(m).trim();
-        if (s && s !== lastText) pushMsg(s, 'bot');
-      }
+    // 1) Массив сообщений
+    if (Array.isArray(norm?.assistant_messages)) {
+      toShow.push(...norm.assistant_messages.map(String));
     }
 
-    // 2) План готов — внедряем в «Задания» (создаём НОВУЮ привычку), в чат НЕ шлём текст плана
+    // 2) Одиночные поля (если массив не пришёл)
+    if (toShow.length === 0) {
+      const single =
+        norm?.reply ??
+        norm?.message ??
+        norm?.content ??
+        norm?.output?.text ??
+        norm?.text ??
+        (norm?.choices && norm.choices[0]?.message?.content) ??
+        (typeof norm === 'string' ? norm : null);
+      if (single) toShow.push(String(single));
+    }
+
+    // 3) Не печатать только во время генерации плана (список статусов под себя)
+    const suppress = /^(generating|creating|building|planning)$/i.test(String(norm?.status || ''));
+
+    // 4) Печатаем ответы (без дедупликации)
+    if (!suppress) {
+      console.log('[API/chat] toShow:', toShow);
+      toShow.forEach(s => { if (s.trim()) pushMsg(s.trim(), 'bot'); });
+    }
+
+    // === План готов — внедряем в «Задания» (создаём НОВУЮ привычку), в чат НЕ шлём текст плана ===
     if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length){
       const baseName = (norm?.extracted?.habit || '').trim();
       const firstText = (typeof norm.plan[0] === 'string'
@@ -847,21 +850,18 @@ async function talkToApi(){
       const target = Number(norm?.extracted?.duration_days) || norm.plan.length;
       h.targetDays = Math.max(1, Math.min(365, target|0));
 
-      h.plan = norm.plan
-        .map((item, idx) => ({
-          day: Number.isFinite(item?.day) ? (item.day|0) : (idx+1),
-          text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0,160)
-        }))
-        .filter(p => p.text);
+      h.plan = norm.plan.map((item, idx)=>({
+        day: Number.isFinite(item?.day) ? (item.day|0) : (idx+1),
+        text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0,160)
+      })).filter(p=>p.text);
 
       h.planGeneratedAt = Date.now();
       saveState(state);
       renderAll();
-      showView('view-habit'); // показываем вкладку «Задания»
-      // В чат план НЕ отправляем.
+      showView('view-habit');  // план внедрён молча
     }
 
-    // 3) Ошибка API
+    // Ошибка API
     if (norm?.error) pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
 
   }catch(e){
@@ -875,24 +875,26 @@ async function talkToApi(){
 /* === КОНЕЦ PATCH === */
 
 
-// === PATCH: send() → все сообщения идут в API ===
 // === SINGLE-SEND: один вызов API на одно действие пользователя ===
 async function sendOnce(){
-  const text = (chatInput?.value || '').trim();
+  const input = document.getElementById('chat-input');
+  const text = (input?.value || '').trim();
   if (!text) return;
 
-  // защита от двойных вызовов (click+Enter)
+  // защита от клика+Enter (дублей)
   if (window.__sending) return;
   window.__sending = true;
 
   try {
     pushMsg(text, 'you');
-    chatInput.value = '';
+    input.value = '';
     await talkToApi();   // ждём один запрос к API
   } finally {
     window.__sending = false;
   }
 }
+window.sendOnce = sendOnce; // на всякий, чтобы дёрнуть из консоли
+
 
 // Снять старые слушатели, если могли дублироваться
 try {
