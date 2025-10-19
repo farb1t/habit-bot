@@ -813,7 +813,20 @@ async function talkToApi(){
           pushMsg(msg, 'bot');
         }
       }
-    }
+    }  else {
+  // === ФОЛЛБЭКЫ НА ДРУГИЕ ФОРМАТЫ ===
+  const fallback =
+    norm?.reply ??
+    norm?.message ??
+    norm?.content ??
+    norm?.output?.text ??
+    norm?.text ??
+    (typeof norm === 'string' ? norm : null);
+
+  if (fallback) {
+    pushMsg(String(fallback), 'bot');
+  }
+}
 
     // 2) Если план готов — МОЛЧА внедрить его во вкладку «Задания» (не постить в чат)
     if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length){
@@ -882,12 +895,7 @@ chatInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') window.send(); 
 }
 
 
-// При первом входе, если чат не запущен — стартуем со Stage 0 промпта
-if(!state.__welcomed_flow_started){
-state.__welcomed_flow_started = true;
-try{ localStorage.setItem('habit_traker_demo_v3', JSON.stringify(state)); }catch(e){}
-askStagePrompt();
-}
+
 
 
   // Avatar upload handler
@@ -934,14 +942,7 @@ askStagePrompt();
     }
   }catch(e){}
 
-  try{
-    const welcomedKey = 'habit_welcome_shown';
-    const was = sessionStorage.getItem(welcomedKey);
-    if(!was){
-      pushMsg('Привет! Напиши короткое название привычки — я добавлю её и спрошу срок (в днях).', 'bot');
-      sessionStorage.setItem(welcomedKey, '1');
-    }
-  }catch(e){}
+  
 
 
 // Debug badge
