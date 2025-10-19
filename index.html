@@ -383,11 +383,8 @@ body.kb-open nav.bottom{
     profile: {name:'Гость', avatar: '', streak:0},
     habits: [],
     trash: [],
-    currentHabitId: null,
-    chat: [],          // 👈 история чата для API
-    __welcomed: false  // 👈 показано ли приветствие
+    currentHabitId: null
   };
-
 
   function saveState(s){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }catch(e){} }
   function loadState(){
@@ -399,21 +396,6 @@ body.kb-open nav.bottom{
       return s;
     }catch(e){ return JSON.parse(JSON.stringify(defaultState)); }
   }
-// --- Safe shims: allow calling querySelector / querySelectorAll globally ---
-(function () {
-  const _qs  = (sel, root) => (root || document).querySelector(sel);
-  const _qsa = (sel, root) => (root || document).querySelectorAll(sel);
-
-  // На объекте окна
-  if (typeof window.querySelector !== 'function')    window.querySelector = _qs;
-  if (typeof window.querySelectorAll !== 'function') window.querySelectorAll = _qsa;
-
-  // На глобальном объекте (работает и в strict)
-  if (typeof globalThis.querySelector !== 'function')    globalThis.querySelector = _qs;
-  if (typeof globalThis.querySelectorAll !== 'function') globalThis.querySelectorAll = _qsa;
-})();
-
-
 
   // DOM
   const views = Array.from(document.querySelectorAll('.view'));
@@ -426,6 +408,72 @@ body.kb-open nav.bottom{
   const sendBtn = document.getElementById('send-btn');
   const chatInput = document.getElementById('chat-input');
   const messages = document.getElementById('messages');
+  // === Новый API-чат (вместо старого локального бота) ===
+const API_BASE = "https://habbitserver.konayevna.workers.dev/api"; // <-- подставь свой адрес
+
+let chatHistory = []; // история переписки для модели
+
+// добавление сообщений в интерфейс
+function pushMsg(text, from='you') {
+  const b = document.createElement('div');
+  b.className = from === 'you' ? 'bubble you' : 'bubble bot';
+  b.textContent = text;
+  messages.appendChild(b);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+// основная функция: обращение к API
+async function apiChatSend(text) {
+  pushMsg(text, 'you');
+  try {
+    const res = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ history: chatHistory, user: text })
+    });
+    const data = await res.json();
+
+    if (data.event === 'message') {
+      pushMsg(data.message || 'Продолжим.', 'bot');
+      chatHistory.push({ role:'assistant', content: data.message || '' });
+    }
+
+    if (data.event === 'habit_created') {
+      let h = state.habits.find(x => x.name === data.plan.habitName);
+      if (!h) h = createHabit(data.plan.habitName);
+
+      h.targetDays = data.plan.termDays;
+      h.goal = data.plan.goal;
+      h.level = data.plan.levelNow;
+      h.plan = { startDate: data.plan.startDate, days: data.plan.days };
+      saveState(state);
+      renderAll();
+      pushMsg(data.notification, 'bot');
+      showView('view-habit');
+    }
+  } catch (e) {
+    console.error(e);
+    pushMsg('Ошибка связи с сервером.', 'bot');
+  }
+}
+
+// обработчик отправки
+function send() {
+  const t = chatInput.value.trim();
+  if (!t) return;
+  chatInput.value = '';
+  chatHistory.push({ role:'user', content: t });
+  apiChatSend(t);
+}
+
+// привязка кнопки и клавиши Enter
+sendBtn.addEventListener('click', send);
+chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+
+// первое приветствие
+pushMsg('Привет! Давай создадим привычку. Как назовём её?', 'bot');
+chatHistory.push({ role:'assistant', content:'Привет! Давай создадим привычку. Как назовём её?' });
+
 
   const profileNameEl = document.getElementById('profile-name');
   const profileStreakEl = document.getElementById('profile-streak');
@@ -435,12 +483,8 @@ body.kb-open nav.bottom{
   const avatarLabel = document.getElementById('avatar-label');
 
 
-  window.state = loadState();
+  let state = loadState();
   if(!('pending' in state)) state.pending = null;
- 
-
-
-
 
   const COLOR_PALETTE = ['#ff6b3d', '#ff3b30', '#59e391', '#4da3ff', '#c792ea', '#ffd166', '#06d6a0', '#f469a9'];
   function uid(){ return 'h' + Math.random().toString(36).slice(2,9); }
@@ -503,15 +547,6 @@ body.kb-open nav.bottom{
         const dot=document.createElement('div'); dot.style.height='8px'; dot.style.width='8px'; dot.style.borderRadius='6px'; dot.style.marginTop='6px';
         if(h.days.includes(dateStr)){ cell.classList.add('done'); dot.style.background='var(--success)'; } else { dot.style.background='transparent'; }
         cell.appendChild(dot);
-        // Показываем задание в title только для прошедших дат и для сегодня
-        const todayIso = isoDate(new Date());
-        const idxFromStart = daysBetween(h.start, dateStr) - 1; // 0-based
-        const isFuture = (new Date(dateStr) > new Date(todayIso));
-        if (!isFuture && h.plan && h.plan[idxFromStart]) {
-          const text = h.plan[idxFromStart].text || h.plan[idxFromStart];
-          if (text) cell.title = text;
-        }
-
         if(dateStr === todayKey){
           cell.style.cursor='pointer'; cell.title='Отметить выполнение за сегодня';
           cell.addEventListener('click', ()=>{
@@ -678,6 +713,13 @@ const complete   = state.habits.filter(h =>  isCompleted(h));
       const sub = document.createElement('div'); sub.className='sub'; sub.textContent = `${done} / ${total} выполнено`;
       progress.appendChild(bar); progress.appendChild(sub);
       card.appendChild(progress);
+  
+  function getTodayTaskText(h) {
+  const today = new Date().toISOString().slice(0, 10);
+  const item = (h.plan?.days || []).find(d => d.date === today);
+  return item ? item.task : 'Задание появится после генерации плана';
+}
+
 
       // Today row
       const todayRow = document.createElement('div'); todayRow.className='today-task';
@@ -695,20 +737,11 @@ const check = document.createElement('div'); check.className='check today-check'
         saveState(state); renderAll();
       });
       const ti = document.createElement('div'); ti.className='task-info';
-      // индекс текущего дня от старта привычки (0-based)
-  const todayIdx = Math.max(0, daysBetween(h.start, todayKey) - 1);
-  const todayTaskText =
-    (h.plan && h.plan[todayIdx] && (h.plan[todayIdx].text || h.plan[todayIdx])) ||
-    (h.targetDays ? 'Задача появится после генерации плана' : 'Укажи срок, чтобы сгенерировать план');
-  
-  const tt = document.createElement('div');
-  tt.style.fontWeight='700';
-  tt.textContent = todayTaskText;
-  
-  const ts = document.createElement('div');
-  ts.className='sub';
-  ts.textContent = doneToday ? '✔ Выполнено' : '✖ Ещё не сделано';
+      const tt = document.createElement('div');
+tt.style.fontWeight='700';
+tt.textContent = getTodayTaskText(h); // ← вместо 'Сегодня'
 
+      const ts = document.createElement('div'); ts.className='sub'; ts.textContent = doneToday ? 'Сегодня — ✔' : 'Сегодня — ✖';
       ti.appendChild(tt); ti.appendChild(ts);
       const muted = document.createElement('div'); muted.className='muted'; muted.textContent = doneToday ? 'Выполнено' : 'Не выполнено';
       todayRow.appendChild(check); todayRow.appendChild(ti); todayRow.appendChild(muted);
@@ -737,184 +770,128 @@ listRoot.appendChild(card);
     renderProfile();
   }
 
+  // Chat (same simple flow as before)
   function pushMsg(text, from='you'){
     const b = document.createElement('div');
     b.className = from==='you' ? 'bubble you' : 'bubble bot';
     b.textContent = text;
     messages.appendChild(b);
     messages.scrollTop = messages.scrollHeight;
-
-  // 👇 сохраняем в state.chat
-    const role = (from === 'you') ? 'user' : 'assistant';
-    state.chat = state.chat || [];
-    state.chat.push({ role, content: String(text) });
-    // ограничим историю, чтобы не раздувать localStorage
-    if (state.chat.length > 60) state.chat = state.chat.slice(-60);
-    saveState(state);
   }
-  // сделать доступной для внешних обработчиков
-window.pushMsg = pushMsg;
+  
+  function parseHabitIntent(text){
+    const t = text.trim();
+    // Normalize spaces
+    let clean = t.replace(/\s+/g,' ').trim();
 
-  // === API: Mistral proxy на Cloudflare ===
-const API_BASE = 'https://habbitserver.konayevna.workers.dev/chat';
+    // Extract number of days (1..365)
+    const numMatch = clean.match(/(\d{1,3})/);
+    const days = numMatch ? Math.max(1, Math.min(365, parseInt(numMatch[1],10))) : null;
 
-// Берём из state.chat только user/assistant
-function buildChatHistory() {
-  return (state.chat || []).map(m => ({ role: m.role, content: m.content }));
-}
+    // Remove helper words and the number to isolate a probable name
+    let name = clean
+      .replace(/^(добав(ь|и)|добавить|создай|создать|прибавь|сделай)\s*/i,'')
+      .replace(/\bна\s+\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
+      .replace(/\b\d{1,3}\s*(дн(я|ей)?|дня|дней)?\b/gi,'')
+      .replace(/\bдн(я|ей)?\b/gi,'')
+      .replace(/\bдень\b/gi,'')
+      .replace(/\s+/g,' ').trim();
 
-// Создание/поиск «текущей» привычки по извлечённым данным
-function ensureCurrentHabitFromExtracted(extracted) {
-  if (!extracted || !extracted.habit) return null;
-  // если есть уже выбранная — используем её
-  if (state.currentHabitId) {
-    return state.habits.find(h => h.id === state.currentHabitId) || null;
-  }
-  // ищем по имени
-  const byName = state.habits.find(
-    h => h.name.toLowerCase() === extracted.habit.toLowerCase()
-  );
+    // If message looks like a habit name (2..40 chars) and not only filler words
+    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(name || '') && !/дн|дней|day|days/i.test(name || '');
 
-  if (byName) { state.currentHabitId = byName.id; saveState(state); return byName; }
-  // создаём новую
- const h = createHabit(extracted.habit);
-state.currentHabitId = h.id;      // ← добавь эту строку
-if (Number.isFinite(extracted.duration_days)) {
-  h.targetDays = Math.max(1, Math.min(365, extracted.duration_days | 0));
-  saveState(state);
-  renderAll();
-}
-return h;
-}
-
-// === API-чат: ответы печатаем, план внедряем молча в «Задания» ===
-async function talkToApi(){
-  try{
-    const res = await fetch(API_BASE, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: buildChatHistory() })
-    });
-
-    const data = await res.json();
-    console.log('[API /chat] raw:', data);
-
-    // Нормализация форматов ответа
-    let norm = data;
-    if (typeof norm === 'string') { try { norm = JSON.parse(norm); } catch{} }
-    if (norm && norm.choices && norm.choices[0]?.message?.content) {
-      try { norm = JSON.parse(norm.choices[0].message.content); } catch{}
+    if(looksLikeName){
+      return { name, days };
     }
-    console.log('[API /chat] norm:', norm);
+    // If the whole text looks like a name (without cleaning)
+    const asName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(clean) && !/дн|дней|day|days/i.test(clean);
+    if(asName){
+      return { name: clean, days };
+    }
+    return null;
+  }
 
-    // === Показ ответа ассистента (любой формат) ===
-    let toShow = [];
+  function botReply(q){
+    const text = q.trim();
 
-    // 1) если пришёл массив сообщений
-    if (Array.isArray(norm?.assistant_messages)) {
-      toShow.push(...norm.assistant_messages.map(String));
+    // If we're waiting for duration, prioritize that flow
+    if(state.pending && state.pending.type==='duration' && state.pending.habitId){
+      const num = (text.match(/(\d{1,3})/)||[])[1];
+      if(num){
+        const n = Math.max(1, Math.min(365, parseInt(num,10)));
+        const h = state.habits.find(x=>x.id===state.pending.habitId);
+        if(h){ h.targetDays = n; saveState(state); renderAll(); }
+        pushMsg(`Отлично, ставлю срок: ${n} дней.`, 'bot');
+        state.pending = null; saveState(state);
+        showView('view-habit');
+        return;
+      } else {
+        pushMsg('Напиши число дней, например: 30', 'bot');
+        return;
+      }
     }
 
-    // 2) если пришло одиночное поле
-    if (toShow.length === 0) {
-      const single =
-        norm?.reply ??
-        norm?.message ??
-        norm?.content ??
-        norm?.output?.text ??
-        norm?.text ??
-        (norm?.choices && norm.choices[0]?.message?.content) ??
-        (typeof norm === 'string' ? norm : null);
-      if (single) toShow.push(String(single));
+    // New: try to parse full intent from a single message
+    const parsed = parseHabitIntent(text);
+    if(parsed && parsed.name){
+      const h = createHabit(parsed.name);
+      if(parsed.days){
+        h.targetDays = parsed.days;
+        saveState(state); renderAll();
+        pushMsg(`Добавил: «${h.name}» на ${parsed.days} дней. Удачи!`, 'bot');
+        showView('view-habit');
+        return;
+      } else {
+        pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+        state.pending = { type:'duration', habitId: h.id }; saveState(state);
+        return;
+      }
     }
 
-    // 3) не печатаем только если бэк явно пометил процесс генерации плана
-    const suppress = /^(generating|creating|building|planning)$/i.test(String(norm?.status || ''));
-
-    if (!suppress) {
-      console.log('[API/chat] toShow:', toShow);
-      toShow.forEach(s => { if (s.trim()) pushMsg(s.trim(), 'bot'); });
+    // Legacy flows below kept for compatibility
+    if(state.pending && state.pending.type==='name'){
+      const name = text.replace(/^привыч(ка|ку)?\s*/i, '').trim() || 'Новая привычка';
+      const h = createHabit(name);
+      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+      state.pending = { type:'duration', habitId: h.id }; saveState(state);
+      return;
     }
 
-    // === План готов — добавляем как НОВУЮ привычку и показываем «Задания» ===
-    if (norm?.status === 'ready' && Array.isArray(norm.plan) && norm.plan.length){
-      const baseName = (norm?.extracted?.habit || '').trim();
-      const firstText = (typeof norm.plan[0] === 'string'
-        ? norm.plan[0]
-        : String(norm.plan[0]?.text || '')
-      ).slice(0, 30);
-      const habitName = baseName || firstText || 'Новая привычка';
-
-      const h = createHabit(habitName);
-      state.currentHabitId = h.id;
-
-      const target = Number(norm?.extracted?.duration_days) || norm.plan.length;
-      h.targetDays = Math.max(1, Math.min(365, target|0));
-
-      h.plan = norm.plan.map((item, idx)=>({
-        day: Number.isFinite(item?.day) ? (item.day|0) : (idx+1),
-        text: (typeof item === 'string' ? item : String(item?.text || '')).slice(0,160)
-      })).filter(p=>p.text);
-
-      h.planGeneratedAt = Date.now();
-      saveState(state);
-      renderAll();
-      showView('view-habit');   // план внедрён молча — в чат его не шлём
+    const numInline = (text.match(/(\d{1,3})/)||[])[1];
+    if(numInline){
+      const h = state.habits[0];
+      if(h){
+        const n = Math.max(1, Math.min(365, parseInt(numInline,10)));
+        h.targetDays = n; saveState(state); renderAll();
+        pushMsg(`Ок, срок для «${h.name}»: ${n} дней.`, 'bot');
+        return;
+      }
     }
 
-    if (norm?.error) pushMsg('Сервер занят или вернул ошибку. Попробуем ещё раз?', 'bot');
+    const looksLikeName = /^[\wА-Яа-яЁё\s.,!()\-\u2013\u2014]{2,40}$/.test(text) && !/дн|дней|day|days/i.test(text);
+    if(looksLikeName){
+      const h = createHabit(text);
+      pushMsg(`Добавил: «${h.name}». На сколько дней планируешь? Напиши число, например: 30`, 'bot');
+      state.pending = { type:'duration', habitId: h.id }; saveState(state);
+      return;
+    }
 
-  }catch(e){
-    console.error(e);
-    pushMsg('Не получилось связаться с сервером. Попробуем ещё раз?', 'bot');
+    if(!state.habits || state.habits.length===0){
+      pushMsg('Что добавить в привычки? Просто напиши короткое название, например: «Пить воду».', 'bot');
+      state.pending = { type:'name' }; saveState(state);
+    } else {
+      pushMsg('Напиши название привычки, которую добавить. Можно сразу указать срок: «Пить воду 30».', 'bot');
+      state.pending = { type:'name' }; saveState(state);
+    }
   }
-}
-window.talkToApi = talkToApi;
 
-
-
-/* === КОНЕЦ PATCH === */
-
-
-// === SINGLE-SEND: один вызов API на одно действие пользователя ===
-async function sendOnce(){
-  const input = document.getElementById('chat-input');
-  const text = (input?.value || '').trim();
-  if (!text) return;
-
-  // защита от клика+Enter (дублей)
-  if (window.__sending) return;
-  window.__sending = true;
-
-  try {
-    pushMsg(text, 'you');
-    input.value = '';
-    await talkToApi();   // ждём один запрос к API
-  } finally {
-    window.__sending = false;
+  function send(){
+    const t = (chatInput?.value||'').trim();
+    if(!t) return;
+    pushMsg(t, 'you'); chatInput.value=''; botReply(t);
   }
-}
-window.sendOnce = sendOnce; // на всякий, чтобы дёрнуть из консоли
-
-
-// Снять старые слушатели, если могли дублироваться
-try {
-  if (sendBtn && sendBtn.cloneNode) {
-    const clone = sendBtn.cloneNode(true);
-    sendBtn.parentNode.replaceChild(clone, sendBtn);
-    window.sendBtn = clone; // обновим ссылку
-  }
-} catch(e){}
-
-// Повесить РОВНО ОДИН обработчик (клик)
-sendBtn?.addEventListener('click', sendOnce);
-
-// Дополнительно: Enter в поле ввода вызывает тот же обработчик
-chatInput?.addEventListener('keydown', (e)=>{
-  if (e.key === 'Enter') sendOnce();
-});
-
-
+  sendBtn?.addEventListener('click', send);
+  chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
 
 
   // Avatar upload handler
@@ -961,135 +938,165 @@ chatInput?.addEventListener('keydown', (e)=>{
     }
   }catch(e){}
 
-  
+  try{
+    const welcomedKey = 'habit_welcome_shown';
+    const was = sessionStorage.getItem(welcomedKey);
+    if(!was){
+      pushMsg('Привет! Напиши короткое название привычки — я добавлю её и спрошу срок (в днях).', 'bot');
+      sessionStorage.setItem(welcomedKey, '1');
+    }
+  }catch(e){}
 
-
-// Debug badge
-try {
-  const badge = document.createElement('div');
-  badge.textContent = 'JS OK';
-  badge.style.position = 'fixed';
-  badge.style.right = '10px';
-  badge.style.bottom = '10px';
-  badge.style.background = 'rgba(0,0,0,0.5)';
-  badge.style.padding = '6px 10px';
-  badge.style.borderRadius = '8px';
-  badge.style.zIndex = '9999';
-  document.body.appendChild(badge);
-  setTimeout(() => badge.remove(), 1500);
-} catch (e) {}
+  // Debug badge
+  try{
+    const badge = document.createElement('div');
+    badge.textContent = 'JS OK';
+    badge.style.position='fixed'; badge.style.right='10px'; badge.style.bottom='10px';
+    badge.style.background='rgba(0,0,0,0.5)'; badge.style.padding='6px 10px'; badge.style.borderRadius='8px'; badge.style.fontSize='12px';
+    badge.style.zIndex='9999';
+    document.body.appendChild(badge);
+    setTimeout(()=>badge.remove(), 1500);
+  }catch(e){}
+})();
 
 // --- Mobile-friendly avatar upload ---
-(function () {
-  function qs(sel, root){ return (root || document).querySelector(sel); }
+(function(){
+  // Try to detect an avatar <img> or clickable area
+  const avatarImg = document.querySelector('.profile-avatar img, img#avatar, .avatar img, .user-avatar img') ||
+                    document.querySelector('#avatar, .profile-avatar, .avatar, .user-avatar');
 
-  const avatarImg =
-    qs('.profile-avatar img, img#avatar, .avatar img, .user-avatar img') ||
-    qs('#avatar, .profile-avatar, .avatar, .user-avatar');
+  const fileInput = document.getElementById('avatarFile');
 
-  const fileInput =
-    document.getElementById('avatarFile') ||
-    (function () {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.capture = 'user';
-      input.style.position = 'absolute';
-      input.style.left = '-9999px';
-      document.body.appendChild(input);
-      return input;
-    })();
-
-  function loadSavedAvatar() {
+  function loadSavedAvatar(){
     try {
-      const data = localStorage.getItem('avatar:data');
-      if (data && avatarImg) avatarImg.src = data;
-    } catch (e) {}
+      let saved = localStorage.getItem('profile.avatar');
+      if(!saved){
+        const raw = localStorage.getItem('habit_traker_demo_v3');
+        if(raw){ try { const s = JSON.parse(raw); saved = s?.profile?.avatar || ''; } catch(e){} }
+      }
+      if(saved && avatarImg){
+        if(avatarImg.tagName.toLowerCase()==='img'){
+          avatarImg.src = saved;
+          try{ avatarImg.classList.remove('hidden'); }catch(e){}
+          try{ const ph=document.getElementById('avatar-placeholder'); if(ph) ph.style.display='none'; }catch(e){}
+        } else {
+          avatarImg.style.backgroundImage = 'url(' + saved + ')';
+          avatarImg.style.backgroundSize = 'cover';
+          avatarImg.style.backgroundPosition = 'center';
+        }
+      }
+    } catch(e){ /* noop */ }
   }
 
-  function handleFiles(files) {
-    const f = files && files[0];
-    if (!f) return;
+  function dataURLFromFile(file, done){
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = e.target.result;
-      try { localStorage.setItem('avatar:data', data); } catch (e) {}
-      if (avatarImg) avatarImg.src = data;
-    };
-    reader.readAsDataURL(f);
+    reader.onload = () => done(null, reader.result);
+    reader.onerror = err => done(err);
+    reader.readAsDataURL(file);
   }
 
-  function init() {
-    if (!fileInput) return;
+  function resizeDataURL(dataURL, maxSize, cb){
+    const img = new Image();
+    img.onload = function(){
+      let w = img.width, h = img.height;
+      if(w <= maxSize && h <= maxSize){
+        return cb(null, dataURL);
+      }
+      if(w > h){
+        h = Math.round(h * (maxSize / w));
+        w = maxSize;
+      } else {
+        w = Math.round(w * (maxSize / h));
+        h = maxSize;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      // Use JPEG to reduce size, fallback to PNG
+      let out = canvas.toDataURL('image/jpeg', 0.85);
+      if(!out) out = canvas.toDataURL('image/png');
+      cb(null, out);
+    };
+    img.onerror = function(){ cb(new Error('image load failed')); };
+    img.src = dataURL;
+  }
 
-    fileInput.addEventListener(
-      'change',
-      (e) => {
-        handleFiles(e.target.files);
-        // сбрасываем, чтобы выбор того же файла снова триггерил change
-        e.target.value = '';
-      },
-      { passive: true }
-    );
+  function setAvatar(src){
+    try { localStorage.setItem('profile.avatar', src); } catch(e){ /* ignore */ }
+    // Sync main app state storage so renderProfile() also sees it
+    try {
+      const k='habit_traker_demo_v3';
+      const raw=localStorage.getItem(k);
+      if(raw){
+        const s=JSON.parse(raw);
+        s.profile = s.profile || {};
+        s.profile.avatar = src;
+        localStorage.setItem(k, JSON.stringify(s));
+      }
+    } catch(e){ /* ignore */ }
+    // Apply to DOM
+    if(avatarImg){
+      if(avatarImg.tagName.toLowerCase()==='img'){
+        avatarImg.src = src;
+        try{ avatarImg.classList.remove('hidden'); }catch(e){}
+        try{ const ph=document.getElementById('avatar-placeholder'); if(ph) ph.style.display='none'; }catch(e){}
+      } else {
+        avatarImg.style.backgroundImage = 'url(' + src + ')';
+        avatarImg.style.backgroundSize = 'cover';
+        avatarImg.style.backgroundPosition = 'center';
+      }
+    }
+  }
 
+  function handleFiles(files){
+    const f = files && files[0];
+    if(!f) return;
+    if(!/^image\\//i.test(f.type)) return;
+    dataURLFromFile(f, function(err, dataURL){
+      if(err) return;
+      resizeDataURL(dataURL, 512, function(err2, resized){
+        if(err2 || !resized) return;
+        setAvatar(resized);
+      });
+    });
+  }
+
+  function init(){
+    // If mobile file input missing, try to use existing #avatar-input
+    const altInput = document.getElementById('avatar-input');
+    if(!fileInput && !altInput) return;
+    const effectiveInput = fileInput || altInput;
+    // iOS requires user gesture: click on avatar should trigger file input
+    if(avatarImg){
+      const makeClickable = (el)=>{
+        el.style.cursor = 'pointer';
+        el.setAttribute('role','button');
+        el.setAttribute('tabindex','0');
+        const openPicker = ()=> effectiveInput && effectiveInput.click();
+        el.addEventListener('click', openPicker, {passive:true});
+        el.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' ') { e.preventDefault(); openPicker(); } });
+      };
+      makeClickable(avatarImg);
+    }
+    effectiveInput.addEventListener('change', function(e){
+      handleFiles(e.target.files);
+      // Reset value so selecting the same file again still fires change
+      e.target.value = '';
+    }, {passive:true});
+
+    // Restore saved avatar on load
     loadSavedAvatar();
   }
 
-  if (document.readyState === 'loading') {
+  if(document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
 })();
 
-})(); // ← IIFE закрыта
-  // === Надёжная отправка: один клик/Enter = один запрос, без «пропаданий» слушателя ===
-(function wireChatSend(){
-  // универсальный обработчик
-  async function sendOnce(){
-    const input = document.getElementById('chat-input');
-    const text = (input?.value || '').trim();
-    if (!text) return;
-
-    // антидубль (если нажали и клик, и Enter)
-    if (window.__sending) return;
-    window.__sending = true;
-
-    try {
-      pushMsg(text, 'you');
-      input.value = '';
-      // обязательно ждём, чтобы __sending снялся в finally
-      await talkToApi();
-    } catch (err) {
-      console.error('sendOnce error:', err);
-    } finally {
-      window.__sending = false;
-    }
-  }
-  window.sendOnce = sendOnce; // чтобы можно было дернуть из консоли
-
-  // 1) Делегирование клика — даже если кнопку перерисуют/клонят, обработчик останется.
-  document.addEventListener('click', (e)=>{
-    const btn = e.target.closest('#send-btn');
-    if (!btn) return;
-    e.preventDefault();
-    sendOnce();
-  }, { passive: false });
-
-  // 2) Enter в поле ввода
-  document.addEventListener('keydown', (e)=>{
-    if (e.key !== 'Enter') return;
-    const el = e.target;
-    if (el && el.id === 'chat-input') {
-      e.preventDefault();
-      sendOnce();
-    }
-  }, { passive: false });
-})();
-
-
 </script>
-
 <style>.bottom *{pointer-events:auto !important;}</style>
 
   <input type="file" id="avatarFile" accept="image/*" capture="user" style="position:absolute;left:-9999px;opacity:0;width:1px;height:1px;" aria-hidden="true">
@@ -1459,9 +1466,21 @@ try {
   document.getElementById('achv-close')?.addEventListener('click',closeModal,{passive:true});
   document.getElementById('achv-backdrop')?.addEventListener('click',e=>{if(e.target.id==='achv-backdrop')closeModal();},{passive:true});
 
-  
-
-
+  function ensureChip(){
+    const p=document.getElementById('view-profile'); if(!p) return;
+    const name=p.querySelector('.name');
+    let h=document.getElementById('series-chip-holder');
+    if(!h){ h=document.createElement('div'); h.id='series-chip-holder'; h.className='series-chip-place'; if(name&&name.parentElement) name.parentElement.after(h); else p.prepend(h); }
+    let c=document.getElementById('series-chip-gold');
+    if(!c){ c=document.createElement('span'); c.id='series-chip-gold'; c.className='series-chip-gold'; c.innerHTML='<span class="flame">🔥</span><span class="series-text">Серия 0 дней</span>'; h.innerHTML=''; h.appendChild(c); }
+    // cleanup duplicates
+    p.querySelectorAll('#streak-chip-el').forEach(n=>n.remove());
+    h.querySelectorAll('span').forEach(n=>{ if(n.id!=='series-chip-gold') n.remove(); });
+  }
+  function updateChip(){
+    const s=getState()||{}; const c=document.getElementById('series-chip-gold'); if(!c) return;
+    const t=c.querySelector('.series-text') || querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
+  }
 
   document.addEventListener('click',function(e){
     const today=!!e.target.closest('.today-check,.check');
@@ -1543,7 +1562,6 @@ try {
     return forms[2];
   }
 
-
   function computeStreakFromState(s){
     if(!s || !Array.isArray(s.habits) || s.habits.length===0) return 0;
     let streak = 0;
@@ -1561,7 +1579,7 @@ try {
     const s = getState() || {};
     const v = (s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
     if(chip){
-      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || document.querySelector('.txt');
+      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || querySelector('.txt');
       if(txt){ txt.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']); }
     }
   }
@@ -1587,42 +1605,6 @@ try {
       holder.appendChild(chip);
     }
   }
-  
-/* ==== chip (series) core ==== */
-function ensureChip(){
-  const p = document.getElementById('view-profile'); if (!p) return;
-  let holder = document.getElementById('series-chip-holder');
-  if (!holder) {
-    holder = document.createElement('div');
-    holder.id = 'series-chip-holder';
-    p.prepend(holder); // или после .name — как у тебя было
-  }
-  let chip = document.getElementById('series-chip-gold');
-  if (!chip) {
-    chip = document.createElement('span');
-    chip.id = 'series-chip-gold';
-    chip.className = 'series-chip-gold';
-    chip.innerHTML = '<span class="flame">🔥</span><span class="series-text">Серия 0 дней</span>';
-    holder.innerHTML = '';
-    holder.appendChild(chip);
-  }
-}
-
-function updateChip(){
-  const s = getState() || {};
-  const chip = document.getElementById('series-chip-gold');
-  if (!chip) return;
-  const v = (s.profile && s.profile.streak) ? s.profile.streak : 0;
-  const span = chip.querySelector('.series-text') || document.querySelector('.series-text');
-  if (span) span.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']);
-}
-
-// алиасы и «глобализация», чтобы старые имена тоже работали
-window.ensureChip = ensureChip;
-window.updateChip = updateChip;
-window.updateGoldChipRect = ensureChip;
-window.updateGoldChipText = updateChip;
-
 
   function recomputeAndPersist(){
     const s = getState() || {};
@@ -1632,7 +1614,7 @@ window.updateGoldChipText = updateChip;
       s.profile.streak = v;
       setState(s);
     }
-    updateChip();
+    updateGoldChipText();
   }
 
   document.addEventListener('DOMContentLoaded', function(){
@@ -1728,8 +1710,9 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('achv-close')?.addEventListener('click',closeModal,{passive:true});
   document.getElementById('achv-backdrop')?.addEventListener('click',e=>{if(e.target.id==='achv-backdrop')closeModal();},{passive:true});
 
- 
-  
+  /* ==== chip ==== */
+  function ensureChip(){const p=document.getElementById('view-profile');if(!p)return;const name=p.querySelector('.name');let holder=document.getElementById('series-chip-holder');if(!holder){holder=document.createElement('div');holder.id='series-chip-holder';holder.className='series-chip-place';if(name&&name.parentElement)name.parentElement.after(holder);else p.prepend(holder);}let chip=document.getElementById('series-chip-gold');if(!chip){chip=document.createElement('span');chip.id='series-chip-gold';chip.className='series-chip-gold';chip.innerHTML='<span class="flame">🔥</span><span class="series-text">Серия 0 дней</span>';holder.innerHTML='';holder.appendChild(chip);}p.querySelectorAll('#streak-chip-el').forEach(n=>n.remove());holder.querySelectorAll('span').forEach(n=>{if(n.id!=='series-chip-gold')n.remove();});}
+  function updateChip(){const s=getState()||{};ensureFields(s);const chip=document.getElementById('series-chip-gold');if(!chip)return;const v=s.profile.streak||0;const span=chip.querySelector('.series-text');if(span)span.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);}
 
   /* ==== medals render fallback (if window.renderBadges missing) ==== */
   function maybeRenderMedals(s){const box=document.getElementById('medals');if(!box) return; if(typeof window.renderBadges==='function'){try{window.renderBadges(s);}catch(_){}}}
@@ -1989,6 +1972,20 @@ document.addEventListener('DOMContentLoaded', function(){
     document.dispatchEvent(new CustomEvent('badges:refresh'));
   }catch(e){}
 })();
+
+  (function refreshAtMidnight(){
+  const msToMidnight = () => {
+    const n = new Date();
+    const t = new Date(n);
+    t.setHours(24,0,0,0);
+    return t - n + 1000;
+  };
+  setTimeout(()=>{
+    renderAll();  // обновляем карточки
+    refreshAtMidnight();
+  }, msToMidnight());
+})();
+
 </script>
 
 </body>
