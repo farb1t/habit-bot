@@ -409,9 +409,11 @@ body.kb-open nav.bottom{
   const chatInput = document.getElementById('chat-input');
   const messages = document.getElementById('messages');
 
-  // безопасные алиасы выборки
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  // --- полифилл для старого кода, чтобы не падал ReferenceError
+const querySelector   = document.querySelector.bind(document);
+const querySelectorAll = document.querySelectorAll.bind(document);
+
 
   // === Новый API-чат (вместо старого локального бота) ===
 const API_BASE = "https://habbitserver.konayevna.workers.dev/api"; // <-- подставь свой адрес
