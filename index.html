@@ -71,11 +71,6 @@
   }
 </style>
 <script>
-
-  // ДОЛЖНО стоять самым первым в скрипте
-globalThis.querySelector    = document.querySelector.bind(document);
-globalThis.querySelectorAll = document.querySelectorAll.bind(document);
-
   // 100dvh fix for iOS Safari: update --vh on resize/orientation
   (function(){
     function setVH(){
@@ -345,7 +340,7 @@ body.kb-open nav.bottom{
     <section class="view hidden" id="view-profile">
       <div class="profile">
         <label class="avatar" id="avatar-label">
-          <img alt="avatar" class="hidden" id="avatar-img" src=""/ decoding="async" loading="eager" >
+          <img alt="avatar" class="hidden" id="avatar-img" src=""/>
           <div id="avatar-placeholder">👤</div>
           <input accept="image/*" id="avatar-input" style="display:none" type="file"/>
         </label>
@@ -388,7 +383,8 @@ body.kb-open nav.bottom{
     profile: {name:'Гость', avatar: '', streak:0},
     habits: [],
     trash: [],
-    currentHabitId: null
+    currentHabitId: null,
+    creationLockUntil: null
   };
 
   function saveState(s){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }catch(e){} }
@@ -398,6 +394,7 @@ body.kb-open nav.bottom{
       if(!raw) return JSON.parse(JSON.stringify(defaultState));
       const s = JSON.parse(raw);
       if(!('trash' in s)) s.trash = [];
+      if(!('creationLockUntil' in s)) s.creationLockUntil = null;
       return s;
     }catch(e){ return JSON.parse(JSON.stringify(defaultState)); }
   }
@@ -414,79 +411,6 @@ body.kb-open nav.bottom{
   const chatInput = document.getElementById('chat-input');
   const messages = document.getElementById('messages');
 
-
-  // --- полифилл для старого кода, чтобы не падал ReferenceError
-const querySelector   = document.querySelector.bind(document);
-const querySelectorAll = document.querySelectorAll.bind(document);
-
-
-  // === Новый API-чат (вместо старого локального бота) ===
-const API_BASE = "https://habbitserver.konayevna.workers.dev/api"; // <-- подставь свой адрес
-
-let chatHistory = []; // история переписки для модели
-
-// добавление сообщений в интерфейс
-function pushMsg(text, from='you') {
-  const b = document.createElement('div');
-  b.className = from === 'you' ? 'bubble you' : 'bubble bot';
-  b.textContent = text;
-  messages.appendChild(b);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-// основная функция: обращение к API
-async function apiChatSend(text) {
-  pushMsg(text, 'you');
-  try {
-    const res = await fetch(`${API_BASE}/chat`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ history: chatHistory, user: text })
-    });
-    const data = await res.json();
-
-    if (data.event === 'message') {
-      pushMsg(data.message || 'Продолжим.', 'bot');
-      chatHistory.push({ role:'assistant', content: data.message || '' });
-    }
-
-    if (data.event === 'habit_created') {
-      let h = state.habits.find(x => x.name === data.plan.habitName);
-      if (!h) h = createHabit(data.plan.habitName);
-
-      h.targetDays = data.plan.termDays;
-      h.goal = data.plan.goal;
-      h.level = data.plan.levelNow;
-      h.plan = { startDate: data.plan.startDate, days: data.plan.days };
-      saveState(state);
-      renderAll();
-      pushMsg(data.notification, 'bot');
-      showView('view-habit');
-    }
-  } catch (e) {
-    console.error(e);
-    pushMsg('Ошибка связи с сервером.', 'bot');
-  }
-}
-
-// обработчик отправки
-function send() {
-  const t = chatInput.value.trim();
-  if (!t) return;
-  chatInput.value = '';
-  chatHistory.push({ role:'user', content: t });
-  apiChatSend(t);
-}
-
-// привязка кнопки и клавиши Enter
-sendBtn.addEventListener('click', send);
-chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-
-// первое приветствие
-pushMsg('Привет! Давай создадим привычку. Как назовём её?', 'bot');
-chatHistory.push({ role:'assistant', content:'Привет! Давай создадим привычку. Как назовём её?' });
-
-
   const profileNameEl = document.getElementById('profile-name');
   const profileStreakEl = document.getElementById('profile-streak');
   const avatarImg = document.getElementById('avatar-img');
@@ -497,6 +421,11 @@ chatHistory.push({ role:'assistant', content:'Привет! Давай созд�
 
   let state = loadState();
   if(!('pending' in state)) state.pending = null;
+function isCreationLocked(){
+  const today = isoDate(new Date());
+  return !!(state.creationLockUntil && today < state.creationLockUntil);
+}
+
 
   const COLOR_PALETTE = ['#ff6b3d', '#ff3b30', '#59e391', '#4da3ff', '#c792ea', '#ffd166', '#06d6a0', '#f469a9'];
   function uid(){ return 'h' + Math.random().toString(36).slice(2,9); }
@@ -505,17 +434,49 @@ chatHistory.push({ role:'assistant', content:'Привет! Давай созд�
     for(const c of COLOR_PALETTE){ if(!used.includes(c)) return c; }
     return COLOR_PALETTE[Math.floor(Math.random()*COLOR_PALETTE.length)];
   }
-  function createHabit(name){
-    if(state.pending && state.pending.type==='duration') state.pending = null;
-    const n = (name||'Новая привычка').trim();
-    const id = uid();
-    const h = { id, name: n, color: pickColor(), start: isoDate(new Date()), days: [] };
-    state.habits.unshift(h);
-    state.currentHabitId = id;
-    saveState(state);
-    renderAll();
-    return h;
+
+
+function createHabit(name, unit, baseline){
+  // 0) Блокируем создание, если действует замок
+  const today = isoDate(new Date());
+  if (state.creationLockUntil && today < state.creationLockUntil) {
+    try {
+      const until = new Date(state.creationLockUntil).toLocaleDateString('ru-RU');
+      pushMsg?.(`Создание новой привычки доступно раз в 30 дней. Это улучшает качество усвоения привычки. Можно будет снова создать после ${until}. Удалите одну из привычек и очистите корзину, чтобы снять ограничение раньше.`, 'bot');
+    } catch(e){}
+    alert(`Создание недоступно до ${state.creationLockUntil}`);
+    return null;
   }
+
+  if(state.pending && state.pending.type==='duration') state.pending = null;
+  const n = (name||'Новая привычка').trim();
+
+  const id = uid();
+  const h = {
+    id,
+    name: n,
+    color: pickColor(),
+    start: isoDate(new Date()),
+    days: [],
+    unit: unit || null,
+    baseline: baseline || null,
+    targetDays: 50
+  };
+
+  state.habits.unshift(h);
+  state.currentHabitId = id;
+
+  // 1) Ставим замок на 30 дней
+  const lockUntilDate = new Date();
+  lockUntilDate.setDate(lockUntilDate.getDate() + 30);
+  state.creationLockUntil = isoDate(lockUntilDate);
+
+  saveState(state);
+  renderAll();
+  return h;
+}
+
+
 
   function showView(id){
     views.forEach(v=> v.id===id? v.classList.remove('hidden') : v.classList.add('hidden'));
@@ -655,6 +616,60 @@ chatHistory.push({ role:'assistant', content:'Привет! Давай созд�
     });
   }
 
+// === Мини-кнопка очистки корзины ===
+(function(){
+  const trashPanel = document.getElementById('trash-panel');
+  if(!trashPanel) return;
+
+  const btn = document.createElement('button');
+  btn.textContent = 'Очистить корзину';
+  btn.className = 'icon-btn';
+  btn.style.marginTop = '8px';
+  btn.style.fontSize = '13px';
+
+btn.addEventListener('click', ()=>{
+  if(!confirm('Удалить все привычки из корзины безвозвратно?')) return;
+  try{
+    const hadItems = Array.isArray(state.trash) && state.trash.length > 0;
+
+    // очищаем корзину
+    state.trash = [];
+
+    if (hadItems) {
+      // снимаем ограничение
+      state.creationLockUntil = null;
+      saveState(state);
+      renderTrash();
+      renderAll();
+
+      // сообщение о снятии + сразу перезапуск мастера с вопросом про единицы
+      try {
+        pushMsg?.('Корзина очищена. Ограничение на создание новой привычки снято.', 'bot');
+        // запускаем ваш 4-шаговый мастер с шагом 1/4
+        resetWizard?.();      // только состояние, без сообщения
+        startWizard?.();      // отправит: «1/4. В чём измеряем цель? …»
+        showView?.('view-chat');
+      } catch(e){}
+      alert('Корзина очищена. Ограничение снято.');
+    } else {
+      // корзина была пустой — ничего не меняем
+      saveState(state);
+      renderTrash();
+      renderAll();
+
+      try { pushMsg?.('Корзина была пустой. Ограничение не изменилось.', 'bot'); } catch(e){}
+      alert('Корзина пуста. Ограничение не изменено.');
+    }
+  }catch(e){ console.warn(e); }
+});
+
+
+
+
+  trashPanel.appendChild(btn);
+})();
+
+
   function deleteHabit(id){
     const idx = state.habits.findIndex(h=>h.id===id);
     if(idx<0) return;
@@ -725,13 +740,6 @@ const complete   = state.habits.filter(h =>  isCompleted(h));
       const sub = document.createElement('div'); sub.className='sub'; sub.textContent = `${done} / ${total} выполнено`;
       progress.appendChild(bar); progress.appendChild(sub);
       card.appendChild(progress);
-  
-  function getTodayTaskText(h) {
-  const today = new Date().toISOString().slice(0, 10);
-  const item = (h.plan?.days || []).find(d => d.date === today);
-  return item ? item.task : 'Задание появится после генерации плана';
-}
-
 
       // Today row
       const todayRow = document.createElement('div'); todayRow.className='today-task';
@@ -745,18 +753,58 @@ const complete   = state.habits.filter(h =>  isCompleted(h));
 const check = document.createElement('div'); check.className='check today-check' + (doneToday ? ' done' : '');
       check.textContent = '✔';
       check.addEventListener('click', ()=>{
-        if(h.days.includes(todayKey)){ h.days = h.days.filter(d=>d!==todayKey); } else { h.days.push(todayKey); }
-        saveState(state); renderAll();
-      });
-      const ti = document.createElement('div'); ti.className='task-info';
-      const tt = document.createElement('div');
-tt.style.fontWeight='700';
-tt.textContent = getTodayTaskText(h); // ← вместо 'Сегодня'
+  const t = isoDate(new Date());
+  // 1) переключаем статус сегодняшней задачи (если есть план)
+  if (h.tasks && h.tasks.length){
+    const i = h.tasks.findIndex(x => x.date >= t);
+    const idx = (i === -1) ? h.tasks.length - 1 : i;
+    h.tasks[idx].done = !h.tasks[idx].done; // TOGGLE
+  }
+  // 2) переключаем отметку в календарном массиве days (для streak)
+  if (h.days.includes(todayKey)) {
+    h.days = h.days.filter(d => d !== todayKey); // снять галочку
+  } else {
+    h.days.push(todayKey);                        // поставить галочку
+  }
 
-      const ts = document.createElement('div'); ts.className='sub'; ts.textContent = doneToday ? 'Сегодня — ✔' : 'Сегодня — ✖';
-      ti.appendChild(tt); ti.appendChild(ts);
-      const muted = document.createElement('div'); muted.className='muted'; muted.textContent = doneToday ? 'Выполнено' : 'Не выполнено';
-      todayRow.appendChild(check); todayRow.appendChild(ti); todayRow.appendChild(muted);
+  saveState(state);
+  renderAll(); // статус «Выполнено/Не выполнено» и заголовок обновятся; задача не листается вперёд
+});
+
+
+      const ti = document.createElement('div'); ti.className='task-info';
+const tt = document.createElement('div'); tt.style.fontWeight='700';
+
+// если есть сгенерированные задачи — показываем текст задачи, иначе — «Сегодня»
+let todayLabel = 'Сегодня';
+if (h.tasks && h.tasks.length){
+  const idx = (function(){
+    const t = isoDate(new Date());
+    const i = h.tasks.findIndex(x => x.date >= t);
+    return (i === -1) ? h.tasks.length - 1 : i;
+  })();
+  const task = h.tasks[idx];
+  todayLabel = formatTodayLine(task) || 'Сегодня';
+}
+tt.textContent = todayLabel;
+
+
+const ts = document.createElement('div'); ts.className='sub'; ts.textContent = doneToday ? 'Сегодня — ✔' : 'Сегодня — ✖';
+ti.appendChild(tt); ti.appendChild(ts);
+
+const muted = document.createElement('div'); muted.className='muted';
+// если есть задачи — статус по текущей задаче, иначе по дню
+if (h.tasks && h.tasks.length){
+  const t = isoDate(new Date());
+  const i = h.tasks.findIndex(x => x.date >= t);
+  const idx = (i === -1) ? h.tasks.length - 1 : i;
+  muted.textContent = (h.tasks[idx].done ? 'Выполнено' : 'Не выполнено');
+} else {
+  muted.textContent = doneToday ? 'Выполнено' : 'Не выполнено';
+}
+
+todayRow.appendChild(check); todayRow.appendChild(ti); todayRow.appendChild(muted);
+
       card.appendChild(todayRow);
 
       // Toggle calendar button
@@ -782,31 +830,742 @@ listRoot.appendChild(card);
     renderProfile();
   }
 
-  // Chat (same simple flow as before)
-  function pushMsg(text, from='you'){
-    const b = document.createElement('div');
-    b.className = from==='you' ? 'bubble you' : 'bubble bot';
-    b.textContent = text;
-    messages.appendChild(b);
-    messages.scrollTop = messages.scrollHeight;
-  }
-  
-
-
-
- function send(){
-  const t = (chatInput?.value || '').trim();
-  if (!t) return;
-  chatInput.value = '';
-
-  // старый локальный бот больше не вызываем:
-  // botReply(t);
-
-  // добавляем ход в историю для модели и уходим в API
-  chatHistory.push({ role: 'user', content: t });
-  apiChatSend(t);        // ← новый вызов
+  // === Chat: новый пошаговый сценарий (цель → единицы → уровень → срок ≥ 60) ===
+function pushMsg(text, from='you'){
+  const b = document.createElement('div');
+  b.className = from==='you' ? 'bubble you' : 'bubble bot';
+  b.textContent = text;
+  messages.appendChild(b);
+  messages.scrollTop = messages.scrollHeight;
 }
 
+// Цель должна содержать кириллицу + конкретное ЧИСЛО + соответствующую единицу
+function isValidGoalWithNumber(s, unit){
+  if(!s) return false;
+  const t = s.trim();
+
+  // базовая валидация текста
+  if(t.length < 5 || t.length > 50) return false;
+  if(!/[А-Яа-яЁё]/.test(t)) return false;            // кириллица
+  if(/^[^А-Яа-яЁё]+$/.test(t)) return false;         // не только цифры/символы
+  if(!/[аеёиоуыэюя]/i.test(t)) return false;        // хотя бы одна гласная
+  if(/(.)\1{3,}/.test(t)) return false;             // «мусорные» повторы
+
+  // обязателен хотя бы один числовой фрагмент
+  if(!/\d+([.,]\d+)?/.test(t)) return false;
+
+  // соответствующая единица
+  const low = t.toLowerCase();
+  if(unit === 'литры'){
+    if(!/(?:\d[0-9.,]*)\s*(л|литр[аоы]?)/.test(low)) return false;
+  } else if(unit === 'минуты'){
+    if(!/(?:\d[0-9.,]*)\s*мин(ут[ы]?)?/.test(low)) return false;
+  } else {
+    return false;
+  }
+
+  return true;
+}
+
+// Парсинг единиц
+function parseUnit(s){
+  const t = s.trim().toLowerCase();
+  if(/литр|л\b/.test(t))   return 'литры';
+  if(/минут|мин\b/.test(t)) return 'минуты';
+  return null;
+}
+
+// Возвращает число (литры или минуты) по выбранной единице, либо null
+function parseBaselineValue(s, unit){
+  if(!s) return null;
+  const t = s.trim().toLowerCase().replace(',', '.');
+
+  if(unit === 'литры'){
+    // "0.5л", "0.5 л", либо просто "0.5"
+    let m = t.match(/^([\d.]+)\s*л/);
+    if(!m) m = t.match(/^([\d.]+)$/);
+    if(m){
+      const liters = parseFloat(m[1]);
+      if(!isNaN(liters)) return liters;
+    }
+    return null;
+  }
+
+  if(unit === 'минуты'){
+    // "10 мин", "10 минут" или просто "10"
+    let m = t.match(/^(\d+)\s*мин/);
+    if(!m) m = t.match(/^(\d+)\s*минут/);
+    if(!m) m = t.match(/^(\d+)$/);
+    if(m){
+      const minutes = parseInt(m[1], 10);
+      if(!isNaN(minutes)) return minutes;
+    }
+    return null;
+  }
+
+  return null;
+}
+
+// Формирует строку для карточки по числу и unit
+function formatBaseline(value, unit){
+  if(unit === 'литры')  return `${value}л`;
+  if(unit === 'минуты') return `${value} минут`;
+  return String(value);
+}
+
+
+// Парсинг срока: "x дней", минимум 60
+function parseTermDays(s){
+  const m = s.match(/(\d{1,4})/);
+  if(!m) return null;
+  const n = Math.max(50, Math.min(365, parseInt(m[1], 10)));
+  return n;
+}
+
+// --- НОВОЕ: ограничения роста, пороги и планировщик нагрузки ---
+// потолки прироста в день по четвертям (1..4), подготовительная часть отдельная
+const UNIT_PERDAY_CAPS = {
+  'минуты': [0.5, 0.75, 1.25, 1.5],   // 1-я..4-я четверти
+  'литры' : [0.025, 0.03, 0.04, 0.045]
+};
+
+// Возвращает массив лимитов по типу единицы
+function getPerDayCaps(unit) {
+  return UNIT_PERDAY_CAPS[unit] || UNIT_PERDAY_CAPS['минуты'];
+}
+
+// Пропускаем подготовку ТОЛЬКО если минуты И (цель < 30) И (база < 10)
+function shouldSkipPrep(unit, targetDaily, baseline){
+  const u = (typeof normalizeUnit === 'function') ? normalizeUnit(unit) : (unit || 'минуты');
+  const tgt = Number(targetDaily) || 0;
+  const baseVal = Number(baseline) || 0;
+  return (u === 'минуты') && (tgt > 0 && tgt < 50) && (baseVal < 10);
+}
+
+// минимумы для подготовительной части
+const MIN_PREP = { 'минуты': 10, 'литры': 0.2 };
+// доли «доступного объёма» (цель - база) по четвертям
+const QUARTILE_PERCENTS = [0.20, 0.45, 0.75, 1.00];
+
+// извлекаем ЧИСЛО из цели: "Читать 30 минут"/"Пить 2л"
+function parseGoalNumber(text, unit){
+  if(!text) return null;
+  const low = String(text).toLowerCase().replace(',', '.');
+  if(unit === 'минуты'){
+    // берём целое число минут перед словом "минут/мин", или первое число
+    let m = low.match(/(\d+)\s*мин/);
+    if(!m){ m = low.match(/(\d+)/); }
+    return m ? Math.max(0, parseInt(m[1],10)) : null;
+  }
+  if(unit === 'литры'){
+    // допускаем "2л", "2 л", "2.5", "2,5"
+    let m = low.match(/([\d.]+)\s*л/);
+    if(!m){ m = low.match(/([\d.]+)/); }
+    return m ? Math.max(0, parseFloat(m[1])) : null;
+  }
+  return null;
+}
+
+// Расчёт остатка rem и вместимости capacity при фиксированной подготовке 15 дней
+function computeRemAndCapacity(baseline, targetDaily, eff, unit){
+  unit = unit || 'минуты';
+
+   // Подготовка: если минуты И цель < 30 И база < 10 — пропускаем
+const skip = shouldSkipPrep(unit, targetDaily, baseline);
+const prepDays = skip ? 0 : 10;
+
+  // Конец подготовки:
+  //  - литры: пол 0.2 всегда
+  //  - минуты: если пропускаем — без пола (стартуем с baseline), иначе пол 10
+  const floor = (unit === 'литры') ? 0.2 : (skip ? -Infinity : 10);
+  const prepEnd = Math.max((baseline||0), floor);
+
+  // остаток после подготовки
+  const rem = Math.max(0, (targetDaily||0) - prepEnd);
+
+  // дни по четвертям
+  const remain = Math.max(0, eff - prepDays);
+  const qLen   = Math.max(1, Math.floor(remain/4));
+  const qDays  = [qLen, qLen, qLen, Math.max(1, remain - 3*qLen)];
+
+  // суммарная вместимость по жёстким лимитам "в день"
+  const perDayCaps = getPerDayCaps(unit); // минуты: [0.5,0.75,1.25,1.5], литры: [0.025,0.03,0.04,0.045]
+  const capacity = perDayCaps.reduce((sum, cap, i) => sum + cap*qDays[i], 0);
+
+  return { rem, capacity, prepDays, prepEnd, qDays, perDayCaps };
+}
+
+
+// эффективные дни: вычитаем каждую 7-ю и ещё 2 «буфера»
+function computeEffectiveDays(totalDays){
+  const t = Math.max(1, totalDays|0);
+  return Math.max(1, t - Math.floor((t-15)/14) - 2);
+}
+
+// помощник: равномерная лестница от start до end, ограничивая суточный прирост capPerDay
+function rampWithCap(daysCount, start, end, perDayCap){
+  const out = [];
+  if(daysCount<=0) return out;
+  const needed = Math.max(0, end - start);
+  if(needed===0){
+    for(let i=0;i<daysCount;i++) out.push(start);
+    return out;
+  }
+  // теоретический равномерный шаг
+  const rawStep = needed / daysCount;
+  const step = Math.min(perDayCap, rawStep);
+  let cur = start;
+  for(let i=0;i<daysCount;i++){
+    // последний день — точно end (чтобы выйти на план)
+    if(i === daysCount-1){
+      cur = Math.min(end, cur + step);
+      out.push(end);
+    } else {
+      cur = Math.min(end, cur + step);
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+// построить дневной план из 5 частей: 0) подготовка, 1-4) четверти
+function buildDailyPlan(baseline, targetDaily, totalDays, unit){
+  const eff = computeEffectiveDays(totalDays);
+  unit = unit || 'минуты';
+  if (eff <= 0) return [];
+
+  // средний дневной прирост по ВСЕМ эффективным дням
+  const deltaTotal = Math.max(0, (targetDaily||0) - (baseline||0));
+  const base = deltaTotal / eff;
+
+  // Подготовка: если минуты и цель < 30 — пропускаем
+const skip = shouldSkipPrep(unit, targetDaily);
+const prepDays = skip ? 0 : 10;
+
+// Конец подготовки
+const floor = (unit === 'литры') ? 0.2 : (skip ? -Infinity : 10);
+const prepEnd = Math.max((baseline||0), floor);
+
+
+  const remain   = Math.max(0, eff - prepDays);
+  const qLen     = Math.max(1, Math.floor(remain/4));
+  const q1 = qLen, q2 = qLen, q3 = qLen, q4 = Math.max(1, remain - q1 - q2 - q3);
+
+  
+
+  const perDayCaps = getPerDayCaps(unit);
+  const plan = [];
+  const prepCap = perDayCaps[0]; // готовимся тем же мягким лимитом
+  if (prepDays > 0) {
+    plan.push(...rampWithCap(prepDays, baseline||0, prepEnd, prepCap));
+  }
+
+  // остаток после подготовки
+  const rem = Math.max(0, (targetDaily||0) - prepEnd);
+// кумулятивные цели по четвертям на остатке
+const qP = [0.20, 0.45, 0.75, 1.00];
+const qTargets = qP.map(p => prepEnd + p * rem);
+const lengths  = [q1, q2, q3, q4];
+
+// строим каждую четверть линейно с учётом «жёстких» потолков/дней
+let cur = plan.length ? plan[plan.length-1] : prepEnd;
+for (let i = 0; i < 4; i++){
+  const seg = rampWithCap(lengths[i], cur, qTargets[i], perDayCaps[i]);
+  plan.push(...seg);
+  cur = plan.length ? plan[plan.length-1] : cur;
+}
+
+// финальный день — ровно цель
+if (plan.length > 0) plan[plan.length-1] = targetDaily;
+return plan;
+
+}
+
+// перегружен ли план для данных «эффективных» дней: проверяем выход за cap и достижение цели
+function isOverloaded(baseline, targetDaily, totalDays, unit){
+  const eff = computeEffectiveDays(totalDays);
+  if (eff <= 0) return true;
+
+  const { rem, capacity } = computeRemAndCapacity(baseline, targetDaily, eff, unit);
+
+  // Условие равновесия: rem < capacity <= rem + 1
+  if (capacity < rem) return true;       // не хватает вместимости — перегружено
+  if (capacity > rem + 1) return true;   // избыточный срок — можно сокращать
+  return false;                           // оптимум
+}
+
+// === Helpers для «Сегодня» ===
+function toYMD(d){ const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); }
+function todayYMD(){ return toYMD(new Date()); }
+
+function findTodayTitleNode(){
+  const nodes = Array.from(document.querySelectorAll('h1,h2,h3,div,span,p'));
+  let n = nodes.find(n => n.textContent && n.textContent.trim() === 'Сегодня');
+  if(!n) n = nodes.find(n => n.textContent && n.textContent.trim().startsWith('Сегодня'));
+  return n || null;
+}
+
+function formatTodayLine(task){
+  if(!task) return '';
+  if(task.type === 'meta' || task.type === 'free') return task.label;
+  if(task.unit === 'литры')  return `${task.value} мл`;
+  if(task.unit === 'минуты') return `${task.value} мин`;
+  return task.label || '';
+}
+
+
+function resolveTodayIndex(habit){
+  if(!habit.tasks || habit.tasks.length===0) return -1;
+  const t = todayYMD();
+  // «сегодняшний» определяется только датой
+  const idx = habit.tasks.findIndex(x => x.date >= t);
+  const safeIdx = (idx === -1) ? habit.tasks.length-1 : idx;
+  habit.currentTaskIdx = safeIdx;         // индекс привязан к дате, а не к клику «выполнено»
+  return habit.currentTaskIdx;
+}
+
+
+function renderTodayTask(h){
+  const node = findTodayTitleNode();
+  if(!node || !h || !h.tasks || !h.tasks.length) return;
+  const i = resolveTodayIndex(h);
+  if(i < 0) return;
+  const task = h.tasks[i];
+  node.textContent = formatTodayLine(task);
+
+  // статус справа «Выполнено/Не выполнено» если рядом есть узел со статусом
+  const sibs = Array.from(node.parentElement?.querySelectorAll('span,div,p') || []);
+  const status = sibs.find(x => /выполнен/i.test(x.textContent||'') || /не выполнен/i.test(x.textContent||''));
+  if(status) status.textContent = task.done ? 'Выполнено' : 'Не выполнено';
+}
+
+function completeTodayTask(habit){
+  const idx = resolveTodayIndex(habit);
+  if(idx < 0) return;
+  habit.tasks[idx].done = true;           // фиксируем выполнение
+  // НЕ листаем на следующий день — ждём смены даты
+  saveState(state);
+  renderTodayTask(habit);                 // обновим статус «Выполнено» рядом с «Сегодня»
+}
+
+
+function wireTodayComplete(h){
+  const title = findTodayTitleNode();
+  if(!title) return;
+  const btn = title.parentElement?.querySelector('button,[role="button"],.icon,.check,.checkbox,.tick,.today-check');
+  if(!btn || btn._boundComplete) return;
+  btn._boundComplete = true;
+  btn.addEventListener('click', ()=>{ try{ completeTodayTask(h); }catch(e){} }, true);
+}
+
+function generateTasksFromPlan(habit){
+  if(!habit) return;
+  const plan = Array.isArray(habit.plan) ? habit.plan.slice() : [];
+  const unit = habit.unit || 'минуты';
+  const start = todayYMD();
+
+  // 1) Два лёгких первых дня
+  const metaDays = [
+    { label: 'Выбери место, где будешь выполнять привычку', type: 'meta' },
+    { label: 'Определи удобное время для привычки',          type: 'meta' },
+  ];
+
+  const tasks = [];
+  // meta-дни (сегодня и завтра)
+  for(let i=0;i<metaDays.length;i++){
+    const d = new Date(); d.setDate(d.getDate() + i);
+    tasks.push({
+      date: toYMD(d), value: null, unit: '', done: false,
+      type: metaDays[i].type, label: metaDays[i].label
+    });
+  }
+
+  // 2) Основные дни плана (с 3-го календарного дня)
+  for(let i=0;i<plan.length;i++){
+    const d = new Date(); d.setDate(d.getDate() + metaDays.length + i);
+    const val = +plan[i];
+
+    // округляем и форматируем
+    let displayValue, displayLabel;
+    if (unit === 'литры') {
+      const ml = Math.round(val * 1000);        // Л -> мл
+      displayValue = ml; displayLabel = `${ml} мл`;
+    } else {
+      const mins = Math.round(val);             // минуты целые
+      displayValue = mins; displayLabel = `${mins} мин`;
+    }
+
+    tasks.push({
+      date: toYMD(d), value: displayValue, unit, done:false,
+      type:'regular', label: displayLabel
+    });
+  }
+
+  // 3) FREE-дни: ровно floor((срок-15)/14), равномерно и не чаще 1/нед
+  const targetDays = Number(habit.targetDays) || (metaDays.length + plan.length);
+  const freeCount  = Math.max(0, Math.floor((targetDays - 15) / 14));
+  const freePhrases = [
+    'Сделай столько, сколько хочется',
+    'Свободный день: сколько пожелаешь',
+    'Делай в своём темпе',
+    'Гибкий день: ориентируйся по самочувствию'
+  ];
+
+  if (freeCount > 0 && tasks.length > metaDays.length) {
+    const startOffset = Math.max(7, metaDays.length);
+    const lastIdx = tasks.length - 1;
+    const available = Math.max(0, lastIdx - startOffset + 1);
+    if (available > 0) {
+      let stride = Math.floor(available / freeCount);
+      stride = Math.max(7, stride);
+
+      let lastPlaced = -Infinity;
+      let placed = 0;
+
+      for (let k = 0; k < freeCount; k++) {
+        let pos = startOffset + k * stride;
+        if (pos > lastIdx) pos = lastIdx;
+
+        let j = pos;
+        while (j <= Math.min(pos + 6, lastIdx) && tasks[j].type !== 'regular') j++;
+        if (j > lastIdx || tasks[j].type !== 'regular') {
+          j = pos - 1;
+          while (j >= startOffset && j >= pos - 6 && tasks[j].type !== 'regular') j--;
+        }
+        if (j < startOffset || tasks[j].type !== 'regular') continue;
+
+        if (j - lastPlaced < 7) {
+          j = Math.min(lastIdx, Math.max(j, lastPlaced + 7));
+          let jj = j;
+          while (jj <= Math.min(j + 6, lastIdx) && tasks[jj].type !== 'regular') jj++;
+          if (jj > lastIdx || tasks[jj].type !== 'regular') continue;
+          j = jj;
+        }
+
+        const phrase = freePhrases[placed % freePhrases.length];
+        tasks[j].type  = 'free';
+        tasks[j].label = phrase;
+        tasks[j].value = null;
+        placed++;
+        lastPlaced = j;
+      }
+    }
+  }
+
+  habit.startDate = start;
+  habit.tasks = tasks;
+  habit.currentTaskIdx = 0;
+}
+
+
+// если перегружено — увеличиваем срок (минимальными шагами), пока не влезет
+function ensureNotOverloaded(baseline, targetDaily, initialDays, unit){
+  let days = Math.max(50, initialDays|0);
+  let guard = 365;
+  let lastDirection = 1;
+  while(guard-- > 0){
+    const eff = computeEffectiveDays(days);
+    const u = unit || 'минуты';
+
+    // пересчёт остатков и вместимости
+    const floor = (u === 'литры') ? 0.2 : 10;
+    const rem = Math.max(0, (targetDaily||0) - Math.max((baseline||0), floor));
+    const perDayCaps = getPerDayCaps(u);
+    const remain = Math.max(0, eff - 15);
+    const qLen = Math.max(1, Math.floor(remain/4));
+    const qDays = [qLen, qLen, qLen, Math.max(1, remain - 3*qLen)];
+    const capacity = perDayCaps.reduce((s, c, i)=>s + c*qDays[i], 0);
+
+    if (capacity >= rem && capacity <= rem + 1) break; // оптимум найден
+    days += (capacity < rem) ? 1 : -1;
+    if (days < 50) days = 50; // минимальный срок 60 дней
+  }
+  if (days < 50) days = 50; // минимальный срок 60 дней
+  return days;
+}
+
+
+
+// Состояние мастера
+function resetWizard(){
+  state.pending = {
+    type: 'wizard',
+    step: 'unit', // 'goal' -> 'unit' -> 'baseline' -> 'term'
+    draft: {
+  name: null,
+  unit: null,          // 'литры' | 'минуты'
+  baseline: null,      // строка для карточки: "0.5л" или "10 минут"
+  baselineValue: null, // число: 0.5 ИЛИ 10 (в зависимости от unit)
+  targetDays: 50,
+  habitId: null
+}
+
+
+  };
+  saveState(state);
+}
+function ensureWizard(){
+  if(!state.pending || state.pending.type !== 'wizard'){
+    resetWizard();
+  }
+}
+
+function startWizard(){
+  ensureWizard();
+  pushMsg('1/4. В чём измеряем цель? Напиши «литры» или «минуты».', 'bot');
+}
+
+
+function botReply(textRaw){
+  const text = (textRaw||'').trim();
+  ensureWizard();
+  const w = state.pending;
+
+  // === Команда "назад" ===
+if(/^назад$/i.test(text)){
+  const prev = {
+    'unit': null,            // нельзя назад
+    'goal': 'unit',
+    'baseline': 'goal',
+    'term': 'baseline'
+  }[w.step];
+
+  if(!prev){
+    pushMsg('Ты уже на первом шаге — дальше некуда 🙂', 'bot');
+    return;
+  }
+
+  w.step = prev;
+  saveState(state);
+
+  // Повторяем предыдущий вопрос
+  switch(prev){
+    case 'unit':
+      pushMsg('1/4. В чём измеряем цель? Напиши «литры» или «минуты».', 'bot');
+      break;
+    case 'goal':
+      pushMsg(
+        w.draft.unit === 'литры'
+          ? '2/4. Сформулируй цель и укажи конкретную цифру в литрах. Пример: «Пить 2л воды». (Или напиши «назад», чтобы вернуться).'
+          : '2/4. Сформулируй цель и укажи конкретную цифру в минутах. Пример: «Читать 20 минут». (Или напиши «назад», чтобы вернуться).',
+        'bot'
+      );
+      break;
+    case 'baseline':
+      pushMsg(
+        w.draft.unit === 'литры'
+          ? '3/4. Укажи текущий дневной уровень в литрах. Пример: «0.5» или «0.5л». (Или напиши «назад», чтобы вернуться).'
+          : '3/4. Укажи текущий дневной уровень в минутах. Пример: «10» или «10 минут». (Или напиши «назад», чтобы вернуться).',
+        'bot'
+      );
+      break;
+  }
+  return;
+}
+
+
+  // Маршрут по шагам
+  switch(w.step){
+    case 'goal': {
+  const u = w.draft.unit; // выбранные единицы уже есть из шага 1
+  if(!isValidGoalWithNumber(text, u)){
+    pushMsg(
+      u === 'литры'
+        ? 'Цель должна содержать конкретную цифру в литрах. Пример: «Пить 2л воды». Попробуй ещё раз.'
+        : 'Цель должна содержать конкретную цифру в минутах. Пример: «Читать 20 минут». Попробуй ещё раз.',
+      'bot'
+    );
+    return;
+  }
+
+  // НОВОЕ: сохраним целевое дневное число из цели
+  const goalValue = parseGoalNumber(text, u);
+  w.draft.targetDaily = goalValue; // число в выбранных единицах
+
+  // НИЧЕГО не создаём здесь — только пишем в драфт
+w.draft.name = text;        // название привычки = цель
+// w.draft.targetDaily уже записали выше из parseGoalNumber(...)
+saveState(state);
+
+
+  // Переходим на шаг 3 — базовый уровень (одно число в выбранной единице)
+  w.step = 'baseline';
+  saveState(state);
+  pushMsg(
+    u === 'литры'
+      ? '3/4. Укажи свой текущий дневной уровень в литрах. Пример: «0.5» или «0.5л». (Или напиши «назад», чтобы вернуться).'
+      : '3/4. Укажи свой текущий дневной уровень в минутах. Пример: «10» или «10 минут». (Или напиши «назад», чтобы вернуться).',
+    'bot'
+  );
+  return;
+}
+
+
+   case 'unit': {
+  // проверяем, выбрал ли пользователь литры или минуты
+  const u = parseUnit(text);
+
+  // 🔹 если ввод некорректный И ЕСТЬ ограничение — сообщаем о нём
+  if(!u && isCreationLocked()){
+    const until = new Date(state.creationLockUntil).toLocaleDateString('ru-RU');
+    pushMsg(`Создание новой привычки доступно раз в 30 дней. Это улучшает качество усвоения привычки. Можно будет снова создать после ${until}. Удалите одну из привычек и очистите корзину, чтобы снять ограничение раньше.`, 'bot');
+    state.pending = null;
+    saveState(state);
+    return;
+  }
+
+  // 🔹 если ввод некорректный, но ограничения нет
+  if(!u){
+    pushMsg('Я не понял. Напиши «литры» или «минуты».', 'bot');
+    return;
+  }
+
+  // 🔹 если всё правильно и введено литры/минуты
+  w.draft.unit = u;
+
+  // проверяем лимит после правильного ввода
+  if (isCreationLocked()){
+    const until = new Date(state.creationLockUntil).toLocaleDateString('ru-RU');
+    pushMsg(`Создание новой привычки доступно раз в 30 дней. Это улучшает качество усвоения привычки. Можно будет снова создать после ${until}. Удалите одну из привычек и очистите корзину, чтобы снять ограничение раньше.`, 'bot');
+    state.pending = null;
+    saveState(state);
+    return;
+  }
+
+  // если ограничений нет — продолжаем мастер
+  w.step = 'goal';
+  saveState(state);
+  pushMsg(
+    w.draft.unit === 'литры'
+      ? '2/4. Сформулируй цель и укажи конкретную цифру в литрах. Примеры: «Пить 2л воды», «Выпивать 1.5л в день». (Или напиши «назад», чтобы вернуться).'
+      : '2/4. Сформулируй цель и укажи конкретную цифру в минутах. Примеры: «Читать 20 минут», «Медитировать 15 минут». (Или напиши «назад», чтобы вернуться).',
+    'bot'
+  );
+  return;
+}
+
+    case 'baseline': {
+  const u = w.draft.unit; // 'литры' | 'минуты'
+  const val = parseBaselineValue(text, u);
+  if(val == null){
+    pushMsg(
+      u === 'литры'
+        ? 'Нужно число в литрах. Пример: «0.5л» или «0.5».'
+        : 'Нужно число в минутах. Пример: «10 минут» или «10».',
+      'bot'
+    );
+    return;
+  }
+
+  w.draft.baselineValue = val;
+  w.draft.baseline = formatBaseline(val, u);
+
+  
+  w.step = 'term';
+  saveState(state);
+  pushMsg('4/4. На какой срок? Напиши «X дней», минимум 50. Если посчитаю привычку прегруженной увеличю срок. ', 'bot');
+  return;
+}
+
+
+   case 'term': {
+  const dRaw = parseTermDays(text);
+  if(!dRaw){
+    pushMsg('Укажи число дней (минимум 50). Пример: 90. Если посчитаю привычку прегруженной, увеличу срок.', 'bot');
+    return;
+  }
+
+  // Данные для проверки/плана
+  const u      = w.draft.unit;                 // 'литры' | 'минуты'
+  const base   = Number(w.draft.baselineValue) || 0;
+  // цель (дневная) берём из заранее распарсенной цели; если нет — пытаемся распарсить сейчас
+  let target   = Number(w.draft.targetDaily);
+  if(!(target>0)) target = parseGoalNumber(w.draft.name, u) || 0;
+
+  // если база слишком мала — доводим в подготовительной части до минимума (это уже учтёт buildDailyPlan)
+  // Проверка перегруженности и возможное увеличение срока
+  const dAdj = ensureNotOverloaded(base, target, Math.max(50, dRaw), u);
+
+  // Создаём привычку ТОЛЬКО на 4-м шаге:
+const h = createHabit(w.draft.name, u, w.draft.baseline);
+
+// Если создание заблокировано (вернулось null) — просто выйдем
+if(!h){
+  // createHabit уже показал сообщение о блокировке
+  return;
+}
+
+// Докинем рассчитанные поля
+h.targetDays  = dAdj;
+try{ h.targetDaily = target; }catch(e){}
+
+saveState(state);
+renderAll();
+
+try {
+  // строим дневной план (используй свою buildDailyPlan)
+  h.plan = buildDailyPlan(Number(w.draft.baselineValue) || 0, Number(w.draft.targetDaily) || 0, h.targetDays, w.draft.unit) || [];
+  generateTasksFromPlan(h);   // создаём массив tasks (с мл/округлением, meta/free)
+  saveState(state);
+  renderTodayTask(h);         // подменяем заголовок «Сегодня»
+  wireTodayComplete(h);       // клик по галочке — отмечает и перелистывает
+} catch(e){}
+
+
+
+  // Сообщаем ТОЛЬКО если увеличили срок
+if(dAdj > Math.max(50, dRaw)){
+  pushMsg(`Срок увеличен до ${dAdj} дней.`, 'bot');
+}
+
+// завершение мастера
+pushMsg(`Готово! «${w.draft.name}». Единицы: ${w.draft.unit}. База: ${w.draft.baseline}. Срок: ${dAdj} дней.`, 'bot');
+
+// 💬 И вот ТЕПЕРЬ — уведомление про ограничение (после «Срок увеличен…» и «Готово!»)
+try {
+  const untilHuman = new Date(state.creationLockUntil).toLocaleDateString('ru-RU');
+  pushMsg(`Привычка создана. Следующую можно будет создать после ${untilHuman}. Чтобы снять ограничение раньше — удалите одну из привычек и очистите корзину.`, 'bot');
+} catch(e){}
+
+state.pending = null;
+saveState(state);
+showView('view-habit');
+return;
+
+}
+
+  }
+}
+
+// Всегда начинаем мастер заново при загрузке (не трогаем сохранённые привычки)
+document.addEventListener('DOMContentLoaded', ()=>{
+  // актуализируем интерфейс
+  try { renderAll?.(); } catch(e){}
+
+  if (isCreationLocked()){
+    const untilHuman = new Date(state.creationLockUntil).toLocaleDateString('ru-RU');
+    const txt = `Вы уже создавали привычку. Следующую можно будет создать после ${untilHuman}. ` +
+                `Чтобы снять ограничение раньше — удалите одну из привычек и очистите корзину.`;
+    try { pushMsg?.(txt, 'bot'); } catch(e){}
+    return; // мастер не запускаем, пока действует лимит
+  }
+
+  // Лимита нет — запускаем ТВОЙ штатный 4-шаговый мастер
+  try{
+    resetWizard();
+    pushMsg('Привет! Давай настроим новую привычку в 4 шага.', 'bot');
+    startWizard();
+  }catch(e){}
+});
+
+
+
+
+  function send(){
+    const t = (chatInput?.value||'').trim();
+    if(!t) return;
+    pushMsg(t, 'you'); chatInput.value=''; botReply(t);
+  }
   sendBtn?.addEventListener('click', send);
   chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
 
@@ -855,14 +1614,7 @@ listRoot.appendChild(card);
     }
   }catch(e){}
 
-  try{
-    const welcomedKey = 'habit_welcome_shown';
-    const was = sessionStorage.getItem(welcomedKey);
-    if(!was){
-      pushMsg('Привет! Напиши короткое название привычки — я добавлю её и спрошу срок (в днях).', 'bot');
-      sessionStorage.setItem(welcomedKey, '1');
-    }
-  }catch(e){}
+  
 
   // Debug badge
   try{
@@ -1362,101 +2114,183 @@ listRoot.appendChild(card);
 
 <script>
 (function(){
-  const STORAGE_KEY='habit_traker_demo_v3';
-  const LOG_KEY=STORAGE_KEY+'_achvlog';
-  const STREAK_STEPS=[7,14,21,30,45,60,75,90,100,120];
-  const MASTERED_STEPS=[1,2,3,4,5];
+  // Ключи и пороги
+  const STORAGE_KEY = 'habit_traker_demo_v3';
+  const LOG_KEY     = STORAGE_KEY + '_achvlog';
+  const STREAK_STEPS   = [7,14,21,30,45,60,75,90,100,120];
+  const MASTERED_STEPS = [1,2,3,4,5];
 
-  function getState(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');}catch(e){return null;}}
-  function setState(s){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(s));}catch(e){}}
-  function getLog(){try{return JSON.parse(localStorage.getItem(LOG_KEY)||'{"streak":{},"mastered":{}}');}catch(e){return{streak:{},mastered:{}};}}
-  function setLog(l){try{localStorage.setItem(LOG_KEY,JSON.stringify(l));}catch(e){}}
-  function isoDate(d){const t=new Date(d.getFullYear(),d.getMonth(),d.getDate());return t.toISOString().slice(0,10);}
-  function decl(n,f){n=Math.abs(n)%100;const n1=n%10;if(n>10&&n<20)return f[2];if(n1>1&&n1<5)return f[1];if(n1==1)return f[0];return f[2];}
-  function snapshotHabits(s){const m=new Map();(s?.habits||[]).forEach(h=>{const t=h?.targetDays?Math.max(1,h.targetDays):null;const set=new Set(Array.isArray(h?.days)?h.days.slice():[]);m.set(h.id,{target:t,set,count:set.size});});return m;}
-  function masteredCount(snap){let c=0;snap.forEach(v=>{if(v.target&&v.count>=v.target)c++;});return c;}
-
-  function openModal(m){const b=document.getElementById('achv-backdrop');const t=document.getElementById('achv-text');if(!b||!t)return;t.textContent=m||'Вы разблокировали награду.';b.style.display='flex';b.classList.add('show');document.body.classList.add('modal-open');}
-  function closeModal(){const b=document.getElementById('achv-backdrop');if(!b)return;b.classList.remove('show');b.style.display='none';document.body.classList.remove('modal-open');}
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
-  document.getElementById('achv-ok')?.addEventListener('click',closeModal,{passive:true});
-  document.getElementById('achv-close')?.addEventListener('click',closeModal,{passive:true});
-  document.getElementById('achv-backdrop')?.addEventListener('click',e=>{if(e.target.id==='achv-backdrop')closeModal();},{passive:true});
-
-  function ensureChip(){
-    const p=document.getElementById('view-profile'); if(!p) return;
-    const name=p.querySelector('.name');
-    let h=document.getElementById('series-chip-holder');
-    if(!h){ h=document.createElement('div'); h.id='series-chip-holder'; h.className='series-chip-place'; if(name&&name.parentElement) name.parentElement.after(h); else p.prepend(h); }
-    let c=document.getElementById('series-chip-gold');
-    if(!c){ c=document.createElement('span'); c.id='series-chip-gold'; c.className='series-chip-gold'; c.innerHTML='<span class="flame">🔥</span><span class="series-text">Серия 0 дней</span>'; h.innerHTML=''; h.appendChild(c); }
-    // cleanup duplicates
-    p.querySelectorAll('#streak-chip-el').forEach(n=>n.remove());
-    h.querySelectorAll('span').forEach(n=>{ if(n.id!=='series-chip-gold') n.remove(); });
+  // Утилиты хранения
+  function getState(){
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); }
+    catch(e){ return null; }
   }
-  function updateChip(){
-    const s=getState()||{}; const c=document.getElementById('series-chip-gold'); if(!c) return;
-    const t=c.querySelector('.series-text') || querySelector('.txt'); const v=(s.profile?.streak)||0; if(t) t.textContent='Серия '+v+' '+decl(v,['день','дня','дней']);
+  function setState(s){
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e){}
+  }
+  function getLog(){
+    try { return JSON.parse(localStorage.getItem(LOG_KEY) || '{"streak":{},"mastered":{}}'); }
+    catch(e){ return {streak:{}, mastered:{}}; }
+  }
+  function setLog(l){
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(l)); } catch(e){}
   }
 
-  document.addEventListener('click',function(e){
-    const today=!!e.target.closest('.today-check,.check');
-    const nav=e.target.closest('.nav-btn');
-    if(!today && !(nav&&nav.dataset&&nav.dataset.view==='view-profile'))return;
+  // Служебные
+  function isoDate(d){ const t=new Date(d.getFullYear(),d.getMonth(),d.getDate()); return t.toISOString().slice(0,10); }
+  // Склонения: ['день','дня','дней'] и т.п.
+  function decl(n, forms){
+    n = Math.abs(n) % 100; const n1 = n % 10;
+    if (n>10 && n<20) return forms[2];
+    if (n1>1 && n1<5) return forms[1];
+    if (n1===1) return forms[0];
+    return forms[2];
+  }
 
-    const date=isoDate(new Date());
-    let prevSnap=null, prevMaster=null, prevStreak=null;
-    if(today){
-      const sp=getState()||{}; prevSnap=snapshotHabits(sp); prevMaster=new Set((sp.profile?.badges?.mastered)||[]); prevStreak=new Set((sp.profile?.badges?.streak)||[]);
-    }
-
-    setTimeout(function(){
-      ensureChip(); updateChip();
-      if(today){
-        const s=getState()||{}; const next=snapshotHabits(s);
-        const log=getLog(); log.mastered[date]=log.mastered[date]||{}; log.streak[date]=log.streak[date]||{};
-
-        // mastered: last day only, once per day per habit
-        let doneId=null;
-        next.forEach((n,id)=>{
-          const p=prevSnap.get(id); if(!p) return;
-          const d=n.count-p.count;
-          const tw=p.set.has(date), tn=n.set.has(date);
-          const fin=!!n.target && n.count===n.target;
-          if(d===1 && !tw && tn && fin && !log.mastered[date][id]) doneId=id;
-        });
-        if(doneId){
-          log.mastered[date][doneId]=true; setLog(log);
-          const pc=[...prevSnap.values()].filter(v=>v.target&&v.count>=v.target).length;
-          const nc=[...next.values()].filter(v=>v.target&&v.count>=v.target).length;
-          if(nc>pc){
-            const s2=getState()||{}; const setM=new Set((s2.profile?.badges?.mastered)||[]);
-            let add=0; for(const st of MASTERED_STEPS){ if(nc>=st && !prevMaster.has(st)) add=st; }
-            if(add){ setM.add(add); s2.profile=s2.profile||{}; s2.profile.badges=s2.profile.badges||{}; s2.profile.badges.mastered=[...setM].sort((a,b)=>a-b); setState(s2); if(typeof window.renderBadges==='function') window.renderBadges(s2); }
-          }
-          openModal('Поздравляем! Привычка завершена 🎉');
-        }
-
-        // streak: trigger once per day per threshold
-        const sNow=getState()||{}; const cur=(sNow.profile?.streak)||0;
-        let addS=0; for(const n of STREAK_STEPS){ if(cur>=n && !prevStreak.has(n)) addS=n; }
-        if(addS && !log.streak[date][addS]){
-          log.streak[date][addS]=true; setLog(log);
-          const setS=new Set((sNow.profile?.badges?.streak)||[]); setS.add(addS);
-          sNow.profile=sNow.profile||{}; sNow.profile.badges=sNow.profile.badges||{}; sNow.profile.badges.streak=[...setS].sort((a,b)=>a-b); setState(sNow);
-          if(typeof window.renderBadges==='function') window.renderBadges(sNow);
-          openModal('Поздравляем! Новая серия: '+addS+' '+decl(addS,['день','дня','дней']));
-        }
+  function computeMasteredCount(state){
+    if(!state || !Array.isArray(state.habits)) return 0;
+    let c = 0;
+    state.habits.forEach(h=>{
+      if(h && typeof h.targetDays==='number' && Array.isArray(h.days)){
+        if(h.days.length >= Math.max(1, h.targetDays)) c++;
       }
+    });
+    return c;
+  }
 
-      if(nav&&nav.dataset&&nav.dataset.view==='view-profile'){ ensureChip(); updateChip(); }
-    }, today?140:70);
+  function currentSnapshot(){
+    const s = getState();
+    const streak   = (s && s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
+    const mastered = computeMasteredCount(s);
+    return { streak, mastered };
+  }
+
+  // Модалка
+  const backdrop = document.getElementById('achv-backdrop');
+  const btnOk    = document.getElementById('achv-ok');
+  const btnClose = document.getElementById('achv-close');
+  const titleEl  = document.getElementById('achv-title');
+  const textEl   = document.getElementById('achv-text');
+
+  function openModal(title, text){
+    try {
+      if(titleEl) titleEl.textContent = title || 'Поздравляем! Новое достижение';
+      if(textEl)  textEl.textContent  = text  || 'Вы разблокировали награду.';
+      if(backdrop){
+        backdrop.classList.add('show');
+        backdrop.style.display = 'flex';
+        document.body.classList.add('modal-open');
+      }
+    } catch(e){}
+  }
+  function closeModal(){
+    try {
+      if(backdrop){
+        backdrop.classList.remove('show');
+        backdrop.style.display = 'none';
+      }
+      document.body.classList.remove('modal-open');
+    } catch(e){}
+  }
+  btnOk   && btnOk.addEventListener('click', closeModal,  {passive:true});
+  btnClose&& btnClose.addEventListener('click', closeModal, {passive:true});
+  backdrop&& backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) closeModal(); }, {passive:true});
+
+  // Тост/салют (если есть из блока Badges)
+  function tryToast(msg){ try{ if(typeof window.showToast==='function') window.showToast(msg); }catch(e){} }
+  function trySparkles(){
+    try{
+      if(typeof window.sparkles==='function'){
+        const box = document.getElementById('medals') || document.body;
+        const r = box.getBoundingClientRect ? box.getBoundingClientRect() : {left:window.innerWidth/2, top:100, width:0};
+        window.sparkles(r.left + (r.width||0)/2, r.top + 20);
+      }
+    }catch(e){}
+  }
+
+  // Выдача награды + запись в лог (анти-дубликат)
+  function award(type, n){
+    const log = getLog();
+    if(!log[type]) log[type] = {};
+    if(log[type][n]) return; // уже выдавали
+
+    // Текст
+    if(type === 'streak'){
+      const title = '🔥 Новая серия!';
+      const body  = `Подряд ${n} ${decl(n,['день','дня','дней'])} — мощно!`;
+      openModal(title, body);
+      tryToast(`Новая серия: ${n} ${decl(n,['день','дня','дней'])}`);
+    } else {
+      const title = '🏆 Новая награда!';
+      const body  = `Завершено привычек: ${n}. Держишь темп!`;
+      openModal(title, body);
+      tryToast(`Награда за привычки: ${n}`);
+    }
+    trySparkles();
+
+    // Помечаем как выданную
+    log[type][n] = isoDate(new Date());
+    setLog(log);
+  }
+
+  // Поиск новых достижений относительно лога
+  function checkForNewRewards(){
+    const {streak, mastered} = currentSnapshot();
+    const log = getLog();
+
+    // Сначала собираем все НЕвыданные достижения
+    const newStreaks   = STREAK_STEPS.filter(m => streak   >= m && !(log.streak   && log.streak[m]));
+    const newMastereds = MASTERED_STEPS.filter(m => mastered>= m && !(log.mastered && log.mastered[m]));
+
+    // Если сразу несколько — выдаём по одному за проход (чтобы модалки не накладывались)
+    if(newStreaks.length){
+      award('streak', newStreaks[newStreaks.length-1]); // самый крупный порог
+      return true;
+    }
+    if(newMastereds.length){
+      award('mastered', newMastereds[newMastereds.length-1]);
+      return true;
+    }
+    return false;
+  }
+
+  // Триггеры: когда меняется прогресс
+  // 1) Клик по сегодняшней отметке
+  document.addEventListener('click', (e)=>{
+    const t = e.target.closest('.today-check,.check');
+    if(t){
+      // Дадим приложению обновить state, затем проверим
+      setTimeout(checkForNewRewards, 120);
+      // Также подстрахуемся — обновим streak в профиле (если базовый рендер профиля не успел)
+      setTimeout(()=>{ try{ if(typeof window.renderProfile==='function') window.renderProfile(); }catch(e){} }, 150);
+    }
   }, {capture:true, passive:true});
 
-  document.addEventListener('DOMContentLoaded', function(){ ensureChip(); updateChip(); });
+  // 2) Изменения в localStorage из других вкладок
+  window.addEventListener('storage', (e)=>{
+    if(e.key === STORAGE_KEY){
+      setTimeout(checkForNewRewards, 80);
+    }
+  });
+
+  // 3) Периодическая проверка (на случай сторонних обновлений)
+  setInterval(checkForNewRewards, 1000);
+
+  // 4) При первом старте страницы — сразу сверим
+  document.addEventListener('DOMContentLoaded', ()=>{ setTimeout(checkForNewRewards, 150); });
+
+  // 5) Если функции рендера переопределяются — проверим ещё раз после них
+  try{
+    const origRenderAll = window.renderAll;
+    window.renderAll = function(){
+      if(typeof origRenderAll === 'function') origRenderAll();
+      // после перерисовки списка задач
+      setTimeout(checkForNewRewards, 80);
+    };
+  }catch(e){}
 })();
 </script>
-<!-- === /PATCH === -->
+
 
 
 <!-- === PATCH: STREAK FIX ONLY (recompute + chip update) === -->
@@ -1491,15 +2325,30 @@ listRoot.appendChild(card);
     return streak;
   }
 
-  function updateGoldChipText(){
-    const chip = document.getElementById('series-chip-gold');
-    const s = getState() || {};
-    const v = (s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
-    if(chip){
-      let txt = chip.querySelector('.series-text') || chip.querySelector('.series-text') || querySelector('.txt');
-      if(txt){ txt.textContent = 'Серия ' + v + ' ' + decl(v, ['день','дня','дней']); }
-    }
-  }
+ // Обновляет текст "золотого чипа" прогресса.
+// Можно передать habitId; если не передан — берём из текущего состояния.
+function updateGoldChipText(habitId){
+  // Берём состояние безопасно, без зависимости от глобальной переменной state
+  const s = (typeof getState === 'function' ? (getState() || {}) : {});
+  const habits = Array.isArray(s.habits) ? s.habits : [];
+  const id = habitId || s.currentHabitId || (habits[0] && habits[0].id);
+  if(!id) return;
+
+  const h = habits.find(x => x.id === id);
+  if(!h) return;
+
+  const { currentDay, total } = computeProgress(h);
+
+  // Ищем чип в карточке привычки; если нет — общий fallback
+  const card = document.querySelector(`[data-habit-id="${h.id}"]`) || document;
+  const chip = card.querySelector('.gold-chip')
+            || card.querySelector('.chip.gold')
+            || document.querySelector('.gold-chip');
+  if(!chip) return;
+
+  chip.textContent = `${currentDay}/${total}`;
+}
+
 
   function ensureGoldChip(){
     const profile = document.getElementById('view-profile');
@@ -1523,16 +2372,23 @@ listRoot.appendChild(card);
     }
   }
 
-  function recomputeAndPersist(){
-    const s = getState() || {};
-    s.profile = s.profile || {streak:0};
-    const v = computeStreakFromState(s);
-    if(s.profile.streak !== v){
-      s.profile.streak = v;
-      setState(s);
-    }
-    updateGoldChipText();
-  }
+ function recomputeAndPersist(){
+  const s = getState() || {};
+  s.profile = s.profile || { streak: 0 };
+
+  const v = computeStreakFromState(s);
+  if (s.profile.streak !== v) s.profile.streak = v;
+
+  setState(s);
+
+  // 1) Перерисовать DOM
+  renderAll();
+
+  // 2) Обновить текст «золотого чипа» ПОСЛЕ рендера
+  // (requestAnimationFrame гарантирует, что DOM уже на месте)
+  requestAnimationFrame(updateGoldChipText);
+}
+
 
   document.addEventListener('DOMContentLoaded', function(){
     // Initial compute & render
@@ -1889,19 +2745,16 @@ document.addEventListener('DOMContentLoaded', function(){
     document.dispatchEvent(new CustomEvent('badges:refresh'));
   }catch(e){}
 })();
-
-  (function refreshAtMidnight(){
-  const msToMidnight = () => {
-    const n = new Date();
-    const t = new Date(n);
-    t.setHours(24,0,0,0);
-    return t - n + 1000;
-  };
-  setTimeout(()=>{
-    renderAll();  // обновляем карточки
-    refreshAtMidnight();
-  }, msToMidnight());
-})();
+// === автообновление надписи "Сегодня" раз в минуту ===
+setInterval(() => {
+  try {
+    const h = state.habits?.length ? state.habits[state.habits.length - 1] : null;
+    if (h && h.tasks && h.tasks.length) {
+      renderTodayTask(h);   // обновляем текст "Сегодня"
+      wireTodayComplete(h); // перепривязываем обработчик на всякий случай
+    }
+  } catch (e) {}
+}, 60 * 1000);
 
 </script>
 
