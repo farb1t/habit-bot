@@ -956,7 +956,7 @@ const prepDays = skip ? 0 : 10;
 // эффективные дни: вычитаем каждую 7-ю и ещё 2 «буфера»
 function computeEffectiveDays(totalDays){
   const t = Math.max(1, totalDays|0);
-  return Math.max(1, t - Math.floor((t-10)/14) - 2);
+  return Math.max(1, t - Math.floor((t-15)/14) - 2);
 }
 
 // помощник: равномерная лестница от start до end, ограничивая суточный прирост capPerDay
@@ -1068,9 +1068,9 @@ function ensureNotOverloaded(baseline, targetDaily, initialDays, unit){
 
     if (capacity >= rem && capacity <= rem + 1) break; // оптимум найден
     days += (capacity < rem) ? 1 : -1;
-    if (days < 50) days = 50; // минимальный срок 50 дней
+    if (days < 50) days = 50; // минимальный срок 60 дней
   }
-  if (days < 50) days = 50; // минимальный срок 50 дней
+  if (days < 50) days = 50; // минимальный срок 60 дней
   return days;
 }
 
@@ -1815,37 +1815,17 @@ document.addEventListener('DOMContentLoaded', ()=>{
   function getState(){
     try{ return JSON.parse(localStorage.getItem('habit_traker_demo_v3')||'null'); }catch(e){ return null; }
   }
- 
-// стало — считаем streak ПО ФАКТУ выполнений в habits[].days и сразу сохраняем в state:
-function currentSnapshot(){
-  const s = getState();
-  let streak = 0;
-
-  if (s && Array.isArray(s.habits) && s.habits.length) {
-    // тот же алгоритм, что и в твоём computeStreak()
-    const d = new Date();
-    while (true) {
-      const key = (function isoDate(d){
-        const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-        return t.toISOString().slice(0,10);
-      })(d);
-      const any = s.habits.some(h => Array.isArray(h.days) && h.days.includes(key));
-      if (any) { streak++; d.setDate(d.getDate()-1); } else { break; }
-    }
+  function currentSnapshot(){
+    const s = getState();
+    if(!s) return {streak:0, mastered:0, badges:{streak:[], mastered:[]}};
+    const streak = (s.profile && s.profile.streak) || 0;
+    const mastered = (function(){
+      let c=0; (s.habits||[]).forEach(h=>{ if(h && h.targetDays && Array.isArray(h.days) && h.days.length >= Math.max(1, h.targetDays)) c++; });
+      return c;
+    })();
+    const b = (s.profile && s.profile.badges) || {streak:[], mastered:[]};
+    return {streak, mastered, badges:b};
   }
-
-  const mastered = computeMasteredCount(s);
-
-  // поддерживаем единый источник правды: кладём актуальный streak в профиль и сохраняем
-  try {
-    s.profile = s.profile || {};
-    s.profile.streak = streak;
-    setState(s);
-  } catch(e){}
-
-  return { streak, mastered };
-}
-
 
   let last = currentSnapshot();
 
@@ -1866,7 +1846,7 @@ function currentSnapshot(){
   // Listen to clicks on day checkboxes to update quickly
   document.addEventListener('click', (e)=>{
     const t = e.target.closest('.today-check,.check');
-    if(t){ setTimeout(maybeUpdate, 200); }
+    if(t){ setTimeout(maybeUpdate, 80); }
   }, {capture:true, passive:true});
 
   // Also listen to storage changes (other tabs)
@@ -1959,33 +1939,11 @@ function currentSnapshot(){
   }
 
   function currentSnapshot(){
-  const s = getState();
-  let streak = 0;
-
-  if (s && Array.isArray(s.habits) && s.habits.length) {
-    const d = new Date();
-    while (true) {
-      const key = (function isoDate(d){
-        const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-        return t.toISOString().slice(0,10);
-      })(d);
-      const any = s.habits.some(h => Array.isArray(h.days) && h.days.includes(key));
-      if (any) { streak++; d.setDate(d.getDate()-1); } else { break; }
-    }
+    const s = getState();
+    const streak   = (s && s.profile && typeof s.profile.streak==='number') ? s.profile.streak : 0;
+    const mastered = computeMasteredCount(s);
+    return { streak, mastered };
   }
-
-  const mastered = computeMasteredCount(s);
-
-  // Сохраняем актуальный streak в профиль, чтобы везде был один источник правды
-  try {
-    s.profile = s.profile || {};
-    s.profile.streak = streak;
-    setState(s);
-  } catch(e){}
-
-  return { streak, mastered };
-}
-
 
   // Модалка
   const backdrop = document.getElementById('achv-backdrop');
@@ -2082,10 +2040,9 @@ function currentSnapshot(){
     const t = e.target.closest('.today-check,.check');
     if(t){
       // Дадим приложению обновить state, затем проверим
-     setTimeout(()=>{ 
-  try{ if(typeof window.renderProfile==='function') window.renderProfile(); }catch(e){}
-  checkForNewRewards();
-}, 200);
+      setTimeout(checkForNewRewards, 120);
+      // Также подстрахуемся — обновим streak в профиле (если базовый рендер профиля не успел)
+      setTimeout(()=>{ try{ if(typeof window.renderProfile==='function') window.renderProfile(); }catch(e){} }, 150);
     }
   }, {capture:true, passive:true});
 
@@ -2198,9 +2155,6 @@ function updateGoldChipText(habitId){
  function recomputeAndPersist(){
   const s = getState() || {};
   s.profile = s.profile || { streak: 0 };
-   // сразу дорисуем бейджи по свежему streak
-try { if (typeof window.renderBadges === 'function') window.renderBadges(getState()); } catch(e){}
-
 
   const v = computeStreakFromState(s);
   if (s.profile.streak !== v) s.profile.streak = v;
@@ -2224,8 +2178,7 @@ try { if (typeof window.renderBadges === 'function') window.renderBadges(getStat
     // Recompute after toggling "Сегодня"
     document.addEventListener('click', function(e){
       if(e.target.closest('.today-check,.check')){
-        setTimeout(recomputeAndPersist, 200);
-
+        setTimeout(recomputeAndPersist, 120);
       }
     }, {capture:true, passive:true});
   });
