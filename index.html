@@ -753,58 +753,15 @@ const complete   = state.habits.filter(h =>  isCompleted(h));
 const check = document.createElement('div'); check.className='check today-check' + (doneToday ? ' done' : '');
       check.textContent = '✔';
       check.addEventListener('click', ()=>{
-  const t = isoDate(new Date());
-  // 1) переключаем статус сегодняшней задачи (если есть план)
-  if (h.tasks && h.tasks.length){
-    const i = h.tasks.findIndex(x => x.date >= t);
-    const idx = (i === -1) ? h.tasks.length - 1 : i;
-    h.tasks[idx].done = !h.tasks[idx].done; // TOGGLE
-  }
-  // 2) переключаем отметку в календарном массиве days (для streak)
-  if (h.days.includes(todayKey)) {
-    h.days = h.days.filter(d => d !== todayKey); // снять галочку
-  } else {
-    h.days.push(todayKey);                        // поставить галочку
-  }
-
-  saveState(state);
-  renderAll(); // статус «Выполнено/Не выполнено» и заголовок обновятся; задача не листается вперёд
-});
-
-
+        if(h.days.includes(todayKey)){ h.days = h.days.filter(d=>d!==todayKey); } else { h.days.push(todayKey); }
+        saveState(state); renderAll();
+      });
       const ti = document.createElement('div'); ti.className='task-info';
-const tt = document.createElement('div'); tt.style.fontWeight='700';
-
-// если есть сгенерированные задачи — показываем текст задачи, иначе — «Сегодня»
-let todayLabel = 'Сегодня';
-if (h.tasks && h.tasks.length){
-  const idx = (function(){
-    const t = isoDate(new Date());
-    const i = h.tasks.findIndex(x => x.date >= t);
-    return (i === -1) ? h.tasks.length - 1 : i;
-  })();
-  const task = h.tasks[idx];
-  todayLabel = formatTodayLine(task) || 'Сегодня';
-}
-tt.textContent = todayLabel;
-
-
-const ts = document.createElement('div'); ts.className='sub'; ts.textContent = doneToday ? 'Сегодня — ✔' : 'Сегодня — ✖';
-ti.appendChild(tt); ti.appendChild(ts);
-
-const muted = document.createElement('div'); muted.className='muted';
-// если есть задачи — статус по текущей задаче, иначе по дню
-if (h.tasks && h.tasks.length){
-  const t = isoDate(new Date());
-  const i = h.tasks.findIndex(x => x.date >= t);
-  const idx = (i === -1) ? h.tasks.length - 1 : i;
-  muted.textContent = (h.tasks[idx].done ? 'Выполнено' : 'Не выполнено');
-} else {
-  muted.textContent = doneToday ? 'Выполнено' : 'Не выполнено';
-}
-
-todayRow.appendChild(check); todayRow.appendChild(ti); todayRow.appendChild(muted);
-
+      const tt = document.createElement('div'); tt.style.fontWeight='700'; tt.textContent = 'Сегодня';
+      const ts = document.createElement('div'); ts.className='sub'; ts.textContent = doneToday ? 'Сегодня — ✔' : 'Сегодня — ✖';
+      ti.appendChild(tt); ti.appendChild(ts);
+      const muted = document.createElement('div'); muted.className='muted'; muted.textContent = doneToday ? 'Выполнено' : 'Не выполнено';
+      todayRow.appendChild(check); todayRow.appendChild(ti); todayRow.appendChild(muted);
       card.appendChild(todayRow);
 
       // Toggle calendar button
@@ -1062,23 +1019,18 @@ const prepEnd = Math.max((baseline||0), floor);
 
   // остаток после подготовки
   const rem = Math.max(0, (targetDaily||0) - prepEnd);
-// кумулятивные цели по четвертям на остатке
-const qP = [0.20, 0.45, 0.75, 1.00];
-const qTargets = qP.map(p => prepEnd + p * rem);
-const lengths  = [q1, q2, q3, q4];
 
-// строим каждую четверть линейно с учётом «жёстких» потолков/дней
-let cur = plan.length ? plan[plan.length-1] : prepEnd;
-for (let i = 0; i < 4; i++){
-  const seg = rampWithCap(lengths[i], cur, qTargets[i], perDayCaps[i]);
-  plan.push(...seg);
-  cur = plan.length ? plan[plan.length-1] : cur;
-}
+  // кумулятивные цели по четвертям на остатке
+  const qP = [0.20, 0.45, 0.75, 1.00]; // литры и минуты — как у тебя
+  const qTargets = qP.map(p => prepEnd + p * rem);
+  const lengths  = [q1, q2, q3, q4];
 
-// финальный день — ровно цель
-if (plan.length > 0) plan[plan.length-1] = targetDaily;
-return plan;
-
+  // строим каждую четверть линейно с учётом «жёстких» потолков/дней
+  let cur = plan.length ? plan[plan.length-1] : prepEnd;
+  
+  // страховка: последний день — точно цель
+  if (plan.length>0) plan[plan.length-1] = targetDaily;
+  return plan;
 }
 
 // перегружен ли план для данных «эффективных» дней: проверяем выход за cap и достижение цели
@@ -1094,168 +1046,6 @@ function isOverloaded(baseline, targetDaily, totalDays, unit){
   return false;                           // оптимум
 }
 
-// === Helpers для «Сегодня» ===
-function toYMD(d){ const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); }
-function todayYMD(){ return toYMD(new Date()); }
-
-function findTodayTitleNode(){
-  const nodes = Array.from(document.querySelectorAll('h1,h2,h3,div,span,p'));
-  let n = nodes.find(n => n.textContent && n.textContent.trim() === 'Сегодня');
-  if(!n) n = nodes.find(n => n.textContent && n.textContent.trim().startsWith('Сегодня'));
-  return n || null;
-}
-
-function formatTodayLine(task){
-  if(!task) return '';
-  if(task.type === 'meta' || task.type === 'free') return task.label;
-  if(task.unit === 'литры')  return `${task.value} мл`;
-  if(task.unit === 'минуты') return `${task.value} мин`;
-  return task.label || '';
-}
-
-
-function resolveTodayIndex(habit){
-  if(!habit.tasks || habit.tasks.length===0) return -1;
-  const t = todayYMD();
-  // «сегодняшний» определяется только датой
-  const idx = habit.tasks.findIndex(x => x.date >= t);
-  const safeIdx = (idx === -1) ? habit.tasks.length-1 : idx;
-  habit.currentTaskIdx = safeIdx;         // индекс привязан к дате, а не к клику «выполнено»
-  return habit.currentTaskIdx;
-}
-
-
-function renderTodayTask(h){
-  const node = findTodayTitleNode();
-  if(!node || !h || !h.tasks || !h.tasks.length) return;
-  const i = resolveTodayIndex(h);
-  if(i < 0) return;
-  const task = h.tasks[i];
-  node.textContent = formatTodayLine(task);
-
-  // статус справа «Выполнено/Не выполнено» если рядом есть узел со статусом
-  const sibs = Array.from(node.parentElement?.querySelectorAll('span,div,p') || []);
-  const status = sibs.find(x => /выполнен/i.test(x.textContent||'') || /не выполнен/i.test(x.textContent||''));
-  if(status) status.textContent = task.done ? 'Выполнено' : 'Не выполнено';
-}
-
-function completeTodayTask(habit){
-  const idx = resolveTodayIndex(habit);
-  if(idx < 0) return;
-  habit.tasks[idx].done = true;           // фиксируем выполнение
-  // НЕ листаем на следующий день — ждём смены даты
-  saveState(state);
-  renderTodayTask(habit);                 // обновим статус «Выполнено» рядом с «Сегодня»
-}
-
-
-function wireTodayComplete(h){
-  const title = findTodayTitleNode();
-  if(!title) return;
-  const btn = title.parentElement?.querySelector('button,[role="button"],.icon,.check,.checkbox,.tick,.today-check');
-  if(!btn || btn._boundComplete) return;
-  btn._boundComplete = true;
-  btn.addEventListener('click', ()=>{ try{ completeTodayTask(h); }catch(e){} }, true);
-}
-
-function generateTasksFromPlan(habit){
-  if(!habit) return;
-  const plan = Array.isArray(habit.plan) ? habit.plan.slice() : [];
-  const unit = habit.unit || 'минуты';
-  const start = todayYMD();
-
-  // 1) Два лёгких первых дня
-  const metaDays = [
-    { label: 'Выбери место, где будешь выполнять привычку', type: 'meta' },
-    { label: 'Определи удобное время для привычки',          type: 'meta' },
-  ];
-
-  const tasks = [];
-  // meta-дни (сегодня и завтра)
-  for(let i=0;i<metaDays.length;i++){
-    const d = new Date(); d.setDate(d.getDate() + i);
-    tasks.push({
-      date: toYMD(d), value: null, unit: '', done: false,
-      type: metaDays[i].type, label: metaDays[i].label
-    });
-  }
-
-  // 2) Основные дни плана (с 3-го календарного дня)
-  for(let i=0;i<plan.length;i++){
-    const d = new Date(); d.setDate(d.getDate() + metaDays.length + i);
-    const val = +plan[i];
-
-    // округляем и форматируем
-    let displayValue, displayLabel;
-    if (unit === 'литры') {
-      const ml = Math.round(val * 1000);        // Л -> мл
-      displayValue = ml; displayLabel = `${ml} мл`;
-    } else {
-      const mins = Math.round(val);             // минуты целые
-      displayValue = mins; displayLabel = `${mins} мин`;
-    }
-
-    tasks.push({
-      date: toYMD(d), value: displayValue, unit, done:false,
-      type:'regular', label: displayLabel
-    });
-  }
-
-  // 3) FREE-дни: ровно floor((срок-15)/14), равномерно и не чаще 1/нед
-  const targetDays = Number(habit.targetDays) || (metaDays.length + plan.length);
-  const freeCount  = Math.max(0, Math.floor((targetDays - 15) / 14));
-  const freePhrases = [
-    'Сделай столько, сколько хочется',
-    'Свободный день: сколько пожелаешь',
-    'Делай в своём темпе',
-    'Гибкий день: ориентируйся по самочувствию'
-  ];
-
-  if (freeCount > 0 && tasks.length > metaDays.length) {
-    const startOffset = Math.max(7, metaDays.length);
-    const lastIdx = tasks.length - 1;
-    const available = Math.max(0, lastIdx - startOffset + 1);
-    if (available > 0) {
-      let stride = Math.floor(available / freeCount);
-      stride = Math.max(7, stride);
-
-      let lastPlaced = -Infinity;
-      let placed = 0;
-
-      for (let k = 0; k < freeCount; k++) {
-        let pos = startOffset + k * stride;
-        if (pos > lastIdx) pos = lastIdx;
-
-        let j = pos;
-        while (j <= Math.min(pos + 6, lastIdx) && tasks[j].type !== 'regular') j++;
-        if (j > lastIdx || tasks[j].type !== 'regular') {
-          j = pos - 1;
-          while (j >= startOffset && j >= pos - 6 && tasks[j].type !== 'regular') j--;
-        }
-        if (j < startOffset || tasks[j].type !== 'regular') continue;
-
-        if (j - lastPlaced < 7) {
-          j = Math.min(lastIdx, Math.max(j, lastPlaced + 7));
-          let jj = j;
-          while (jj <= Math.min(j + 6, lastIdx) && tasks[jj].type !== 'regular') jj++;
-          if (jj > lastIdx || tasks[jj].type !== 'regular') continue;
-          j = jj;
-        }
-
-        const phrase = freePhrases[placed % freePhrases.length];
-        tasks[j].type  = 'free';
-        tasks[j].label = phrase;
-        tasks[j].value = null;
-        placed++;
-        lastPlaced = j;
-      }
-    }
-  }
-
-  habit.startDate = start;
-  habit.tasks = tasks;
-  habit.currentTaskIdx = 0;
-}
 
 
 // если перегружено — увеличиваем срок (минимальными шагами), пока не влезет
@@ -1501,16 +1291,6 @@ try{ h.targetDaily = target; }catch(e){}
 
 saveState(state);
 renderAll();
-
-try {
-  // строим дневной план (используй свою buildDailyPlan)
-  h.plan = buildDailyPlan(Number(w.draft.baselineValue) || 0, Number(w.draft.targetDaily) || 0, h.targetDays, w.draft.unit) || [];
-  generateTasksFromPlan(h);   // создаём массив tasks (с мл/округлением, meta/free)
-  saveState(state);
-  renderTodayTask(h);         // подменяем заголовок «Сегодня»
-  wireTodayComplete(h);       // клик по галочке — отмечает и перелистывает
-} catch(e){}
-
 
 
   // Сообщаем ТОЛЬКО если увеличили срок
@@ -2745,17 +2525,6 @@ document.addEventListener('DOMContentLoaded', function(){
     document.dispatchEvent(new CustomEvent('badges:refresh'));
   }catch(e){}
 })();
-// === автообновление надписи "Сегодня" раз в минуту ===
-setInterval(() => {
-  try {
-    const h = state.habits?.length ? state.habits[state.habits.length - 1] : null;
-    if (h && h.tasks && h.tasks.length) {
-      renderTodayTask(h);   // обновляем текст "Сегодня"
-      wireTodayComplete(h); // перепривязываем обработчик на всякий случай
-    }
-  } catch (e) {}
-}, 60 * 1000);
-
 </script>
 
 </body>
