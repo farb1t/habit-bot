@@ -757,7 +757,7 @@ const check = document.createElement('div'); check.className='check today-check'
         saveState(state); renderAll();
       });
       const ti = document.createElement('div'); ti.className='task-info';
-      const tt = document.createElement('div'); tt.style.fontWeight='700'; tt.textContent = 'Сегодня';
+      const tt = document.createElement('div'); tt.style.fontWeight='700'; tt.textContent = getTodayTaskTitle(h);
       const ts = document.createElement('div'); ts.className='sub'; ts.textContent = doneToday ? 'Сегодня — ✔' : 'Сегодня — ✖';
       ti.appendChild(tt); ti.appendChild(ts);
       const muted = document.createElement('div'); muted.className='muted'; muted.textContent = doneToday ? 'Выполнено' : 'Не выполнено';
@@ -786,6 +786,155 @@ listRoot.appendChild(card);
     renderTrash();
     renderProfile();
   }
+
+  // === COMPACT PLAN ENGINE ===
+
+// 2 стартовых задания (всегда самые первые)
+const START_TASKS = [
+  {type:'meta', title:'Подготовься ментально к привычке'},
+  {type:'meta', title:'Выбери место и время для привычки'}
+];
+
+// helpers: действие из цели + формат заголовка; литры -> мл
+function capFirst(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : ''; }
+function extractAction(unit, goalText){
+  const t = (goalText||'').trim().toLowerCase();
+  if(!t) return (unit==='литры' ? 'пей' : 'делай');
+  const cut = t.split(/[0-9]/)[0].trim();
+  const w = (cut.split(/\s+/)[0] || '').replace(/[^\p{L}]/gu,'');
+  return w || (unit==='литры' ? 'пей' : 'делай');
+}
+function titleFor(unit, action, value){
+  if(unit === 'литры'){
+    const ml = Math.round((Number(value)||0)*1000);
+    return `${capFirst(action)} ${ml} мл`;
+  }
+  const min = Math.round(Number(value)||0);
+  return `${capFirst(action)} ${min} минут`;
+}
+
+// подготовка
+function makePrep(unit, baseVal, targetVal, action){
+  const out = [];
+  if(unit === 'литры'){
+    let cur = Math.max(0, baseVal);
+    for(let i=0;i<10;i++){
+      cur = Math.max(cur, (i+1)*0.02); // к 10-му дню 0.2л
+      out.push({type:'prep', value:+cur.toFixed(3), title: titleFor('литры', action, cur)});
+    }
+    return out;
+  }
+  const needPrep = (targetVal>=50) || (baseVal<10);
+  if(!needPrep) return [];
+  const step = (baseVal>0 ? baseVal/10 : 1);
+  let cur = Math.max(0, baseVal);
+  for(let i=0;i<10;i++){
+    cur = cur + step;
+    out.push({type:'prep', value:Math.round(cur), title: titleFor('минуты', action, cur)});
+  }
+  return out;
+}
+
+// четверть
+function makeQuarter(unit, startVal, incPerDay, days, action){
+  const out = []; let cur = startVal;
+  for(let i=0;i<days;i++){
+    cur += incPerDay;
+    out.push({type:'q', value: unit==='литры' ? +cur.toFixed(3) : Math.round(cur), title: titleFor(unit, action, cur)});
+  }
+  return out;
+}
+
+// врезки ( (срок-15)/14 штук, не чаще раз в 7 дней )
+function injectRandoms(arr, totalDays){
+  const count = Math.max(0, Math.floor((totalDays-15)/14));
+  if(!count) return arr;
+  const ideas = [
+    'Сделай сколько захочешь',
+    'Разгрузочный день: прогулка 15 мин',
+    'Делай сколько пожелаешь',
+    'Запиши 3 причины продолжать',
+    'Сегодня можешь отдохнуть'
+  ];
+  const taken = new Set();
+  function canPlace(idx){
+    if(idx<0 || idx>=arr.length) return false;
+    for(const t of taken){ if(Math.abs(t-idx)<7) return false; }
+    return true;
+  }
+  let placed=0, guard=1000;
+  while(placed<count && guard--){
+    const idx = Math.floor(Math.random()*arr.length);
+    if(canPlace(idx)){
+      taken.add(idx);
+      arr[idx] = {type:'rnd', title: ideas[Math.floor(Math.random()*ideas.length)], value:null};
+      placed++;
+    }
+  }
+  return arr;
+}
+
+// собрать план
+function generatePlan(unit, baseVal, targetVal, termDays, action){
+  unit = unit || 'минуты';
+  baseVal = Number(baseVal)||0;
+  targetVal = Number(targetVal)||0;
+  action = action || extractAction(unit, '');
+
+  const rem = Math.max(0, targetVal - baseVal);
+  const prep = makePrep(unit, baseVal, targetVal, action);
+
+  // длины четвертей: с подготовкой (срок-12)//4, без — (срок-2)//4
+  const cut = prep.length ? 12 : 2;
+  const qTotal = Math.max(1, termDays - cut);
+  const qLen = Math.max(1, Math.floor(qTotal/4));
+  const qDays = [qLen, qLen, qLen, Math.max(1, qTotal - 3*qLen)];
+
+  // приросты по четвертям:
+  const qInc = [
+    (rem - 0.80*rem) / qDays[0], // 20% REM / дни
+    (rem - 0.75*rem) / qDays[1], // 25% REM / дни
+    (rem - 0.70*rem) / qDays[2], // 30% REM / дни
+    (rem - 0.75*rem) / qDays[3]  // 25% REM / дни
+  ];
+
+  let startAfterPrep = baseVal;
+  if(prep.length){
+    startAfterPrep = unit==='литры' ? Math.max(baseVal, 0.2) : Math.max(baseVal, prep[prep.length-1].value||baseVal);
+  }
+
+  let cur = startAfterPrep;
+  const q1 = makeQuarter(unit, cur, qInc[0], qDays[0], action); cur = q1.length? q1[q1.length-1].value : cur;
+  const q2 = makeQuarter(unit, cur, qInc[1], qDays[1], action); cur = q2.length? q2[q2.length-1].value : cur;
+  const q3 = makeQuarter(unit, cur, qInc[2], qDays[2], action); cur = q3.length? q3[q3.length-1].value : cur;
+  const q4 = makeQuarter(unit, cur, qInc[3], qDays[3], action);
+
+  const body = [...prep, ...q1, ...q2, ...q3, ...q4];
+  injectRandoms(body, termDays);
+  return [...START_TASKS, ...body];
+}
+
+// текущая задача (из плана)
+function getTodayTaskTitle(h){
+  if(!h || !Array.isArray(h.plan) || !h.plan.length) return 'Сегодня';
+  const i = Math.min(h.idx||0, h.plan.length-1);
+  return h.plan[i]?.title || 'Сегодня';
+}
+
+// ночной сдвиг индексов: если вчера было отмечено — двигаем указатель
+function rollDailyPointers(state){
+  const today = isoDate(new Date());
+  const y = new Date(); y.setDate(y.getDate()-1);
+  const yesterday = isoDate(y);
+  if(state.lastSeenDate === today) return;
+  (state.habits||[]).forEach(h=>{
+    if(Array.isArray(h.days) && h.days.includes(yesterday)){
+      h.idx = Math.min((h.idx||0)+1, Math.max(0,(h.plan?.length||1)-1));
+    }
+  });
+  state.lastSeenDate = today;
+}
+
 
   // === Chat: новый пошаговый сценарий (цель → единицы → уровень → срок ≥ 60) ===
 function pushMsg(text, from='you'){
@@ -1289,6 +1438,14 @@ if(!h){
 h.targetDays  = dAdj;
 try{ h.targetDaily = target; }catch(e){}
 
+// действие из цели + генерация плана
+const action = extractAction(u, w.draft.name) || (u==='литры' ? 'пей' : 'делай');
+h.action = action;
+const plan = generatePlan(u, Number(w.draft.baselineValue)||0, Number(target)||0, dAdj, action);
+h.plan = plan;
+h.idx = 0;
+state.lastSeenDate = isoDate(new Date());
+
 saveState(state);
 renderAll();
 
@@ -1321,6 +1478,8 @@ return;
 document.addEventListener('DOMContentLoaded', ()=>{
   // актуализируем интерфейс
   try { renderAll?.(); } catch(e){}
+  try { rollDailyPointers(state); saveState(state); } catch(e){}
+
 
   if (isCreationLocked()){
     const untilHuman = new Date(state.creationLockUntil).toLocaleDateString('ru-RU');
