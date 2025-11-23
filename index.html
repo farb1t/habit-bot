@@ -255,6 +255,7 @@ html, body { -ms-overflow-style: none; } /* IE/Edge legacy */
     height: calc(var(--vh, 1vh) * 100) !important;
     margin: 0 !important;
     border-radius: 0 !important;
+    padding-top: calc(20px + var(--safe-top)) !important;
   }
   nav.bottom{
     position: fixed !important;
@@ -2561,8 +2562,16 @@ document.addEventListener('DOMContentLoaded', function(){
 <style>
   /* Hide streak chip in awards region */
   #series-chip-holder, #series-chip-gold { display: none !important; }
-  /* Editable name: subtle affordance */
-  #view-profile .name, #profile-name { cursor: text; border-bottom: 1px dashed rgba(255,255,255,.25); }
+ /* editable name: subtle affordance */
+#view-profile .name,
+#profile-name {
+  cursor: text;
+  border-bottom: 1px dashed rgba(255,255,255,.25);
+  display: inline-block;
+  padding: 0 4px;
+  margin: 0 auto;
+}
+
 </style>
 <script>
 (function(){
