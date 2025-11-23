@@ -299,11 +299,11 @@ nav.bottom{
 body.kb-open nav.bottom{
   position: fixed !important;
   left: 0; right: 0;
-  /* push nav below the visible area by keyboard height (when available) */
+  /* pushed visually below keyboard, но клики не блокируем */
   bottom: calc(-1 * var(--kb, 0px)) !important;
   transform: translateY(110%);
   opacity: 0;
-  pointer-events: none;
+  /* pointer-events: none;  // УБРАЛИ, чтобы не “съедать” первый тап */
 }
 </style>
 
@@ -493,13 +493,16 @@ function createHabit(name, unit, baseline){
     else b.classList.remove('active');
   });
 
-  // заголовок + спец-логика для чата
+  const mainEl = document.querySelector('main');
+
+  // заголовок + спец-логика для чата/профиля
   if (id === 'view-habit') {
     headerTitle.textContent = 'Привычки';
+    if (mainEl) mainEl.scrollTop = 0;
+    window.scrollTo(0, 0);
   } else if (id === 'view-chat') {
     headerTitle.textContent = 'Чат';
 
-    // даём макету дорисоваться, потом скроллим и фокусим инпут
     setTimeout(() => {
       if (messages) {
         messages.scrollTop = messages.scrollHeight;
@@ -510,8 +513,12 @@ function createHabit(name, unit, baseline){
     }, 0);
   } else if (id === 'view-profile') {
     headerTitle.textContent = 'Профиль';
+    // Всегда показываем профиль с верха
+    if (mainEl) mainEl.scrollTop = 0;
+    window.scrollTo(0, 0);
   }
 }
+
 
   // Calendar renderer for a given container & habit
   function renderCalendar(h, wrapper, ym){
@@ -2648,15 +2655,21 @@ document.addEventListener('DOMContentLoaded', function(){
   function isInput(el){
     return el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable);
   }
-  function toggleKB(open){
-    document.body.classList.toggle('kb-open', !!open);
-    if(open){
-      try{
+ function toggleKB(open){
+  document.body.classList.toggle('kb-open', !!open);
+  if(open){
+    try{
+      // Скроллим вниз ТОЛЬКО если открыт чат
+      var chatView = document.getElementById('view-chat');
+      if (chatView && !chatView.classList.contains('hidden')) {
         var messages = document.getElementById('messages');
-        if(messages){ messages.scrollTop = messages.scrollHeight; }
-      }catch(e){}
-    }
+        if (messages) {
+          messages.scrollTop = messages.scrollHeight;
+        }
+      }
+    }catch(e){}
   }
+}
 
   var vv = window.visualViewport;
   function updateKB(){
