@@ -1477,6 +1477,15 @@ const action = extractAction(u, w.draft.name) || (u==='литры' ? 'пей' : 
 h.action = action;
 const plan = generatePlan(u, Number(w.draft.baselineValue)||0, Number(target)||0, dAdj, action);
 h.plan = plan;
+console.log('СОЗДАННЫЙ ПЛАН ДЛЯ ПРИВЫЧКИ:', {
+  name: h.name,
+  unit: u,
+  baseline: base,
+  targetDaily: target,
+  termDays: dAdj,
+  plan: plan
+});
+
 h.idx = 0;
 state.lastSeenDate = isoDate(new Date());
 
