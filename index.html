@@ -1526,8 +1526,9 @@ return;
 // Всегда начинаем мастер заново при загрузке (не трогаем сохранённые привычки)
 document.addEventListener('DOMContentLoaded', ()=>{
   // актуализируем интерфейс
-  try { renderAll?.(); } catch(e){}
   try { rollDailyPointers(state); saveState(state); } catch(e){}
+  try { renderAll?.(); } catch(e){}
+
 
 
   if (isCreationLocked()){
