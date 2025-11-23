@@ -347,8 +347,9 @@ body.kb-open nav.bottom{
           <input accept="image/*" id="avatar-input" style="display:none" type="file"/>
         </label>
         <div>
-          <div class="name" id="profile-name">Гость</div>
-          <div class="streak" id="profile-streak">Streak: 0</div>
+        <div style="width:100%; text-align:center;">
+  <div class="name" id="profile-name" style="margin:0 auto;">Гость</div>
+
         </div>
         <h3 style="margin-top:16px">Награды</h3>
         <div class="medals" id="medals">
@@ -1796,12 +1797,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   @keyframes pop-in{ 0%{transform:scale(.7); opacity:0} 60%{transform:scale(1.08); opacity:1} 100%{transform:scale(1)} }
   .badge svg{display:block}
   .medals{gap:12px !important}
-  .streak-chip{
-    display:inline-flex; align-items:center; gap:6px;
-    padding:6px 10px; border-radius:999px; font-weight:700;
-    background:linear-gradient(90deg, #ff9a5a, #ff3b30);
-    color:#0b0c0f; box-shadow:0 6px 20px rgba(255,90,48,0.35);
-  }
+
   .toast{
     position:fixed; left:50%; bottom:100px; transform:translateX(-50%);
     background:linear-gradient(180deg, rgba(40,40,40,.9), rgba(0,0,0,.9));
