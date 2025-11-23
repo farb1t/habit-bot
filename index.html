@@ -70,18 +70,7 @@
     *{ animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
   }
 </style>
-<script>
-  // 100dvh fix for iOS Safari: update --vh on resize/orientation
-  (function(){
-    function setVH(){
-      const vh = window.innerHeight * 0.01;
-      document.documentElement.style.setProperty('--vh', vh + 'px');
-    }
-    setVH();
-    window.addEventListener('resize', setVH, {passive:true});
-    window.addEventListener('orientationchange', setVH, {passive:true});
-  })();
-</script>
+
 <meta charset="utf-8"/>
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -285,7 +274,6 @@ nav.bottom{
   }
 }
 /* Adjust layout on keyboard open */
-body.kb-open nav.bottom{ position: static !important; } /* avoid fixed jank under keyboard */
 body.kb-open .app{ height: auto !important; min-height: calc(var(--vh, 1vh) * 100); }
 body.kb-open .chat{ height: auto !important; }
 body.kb-open main{ padding-bottom: 12px !important; }
@@ -479,12 +467,37 @@ function createHabit(name, unit, baseline){
 
 
   function showView(id){
-    views.forEach(v=> v.id===id? v.classList.remove('hidden') : v.classList.add('hidden'));
-    navBtns.forEach(b=> b.dataset.view===id ? b.classList.add('active') : b.classList.remove('active'));
-    if(id==='view-habit') headerTitle.textContent = 'Привычки';
-    else if(id==='view-chat') headerTitle.textContent = 'Чат';
-    else if(id==='view-profile') headerTitle.textContent = 'Профиль';
+  // переключаем секции
+  views.forEach(v => {
+    if (v.id === id) v.classList.remove('hidden');
+    else v.classList.add('hidden');
+  });
+
+  // подсветка табов
+  navBtns.forEach(b => {
+    if (b.dataset.view === id) b.classList.add('active');
+    else b.classList.remove('active');
+  });
+
+  // заголовок + спец-логика для чата
+  if (id === 'view-habit') {
+    headerTitle.textContent = 'Привычки';
+  } else if (id === 'view-chat') {
+    headerTitle.textContent = 'Чат';
+
+    // даём макету дорисоваться, потом скроллим и фокусим инпут
+    setTimeout(() => {
+      if (messages) {
+        messages.scrollTop = messages.scrollHeight;
+      }
+      if (chatInput) {
+        chatInput.focus();
+      }
+    }, 0);
+  } else if (id === 'view-profile') {
+    headerTitle.textContent = 'Профиль';
   }
+}
 
   // Calendar renderer for a given container & habit
   function renderCalendar(h, wrapper, ym){
@@ -1507,6 +1520,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }
   sendBtn?.addEventListener('click', send);
   chatInput?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
+
+  chatInput?.addEventListener('focus', () => {
+  if (messages) {
+    messages.scrollTop = messages.scrollHeight;
+  }
+});
+
 
 
   // Avatar upload handler
