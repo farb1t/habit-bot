@@ -17,12 +17,15 @@
   @media (max-width: 600px) {
     body{ background-attachment: fixed; }
     .app{
-      max-width: 100%;
-      width: 100%;
-      height: calc(var(--vh, 1vh) * 100);
-      margin: 0;
-      border-radius: 0;
-    }
+    max-width: 100% !important;
+    width: 100% !important;
+    height: calc(var(--vh, 1vh) * 100) !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+
+    padding-top: calc(env(safe-area-inset-top, 20px) + 12px) !important;
+}
+
     header{
       padding-top: calc(14px + var(--safe-top));
       padding-left: max(12px, var(--safe-left));
