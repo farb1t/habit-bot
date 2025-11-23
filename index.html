@@ -2780,10 +2780,11 @@ document.addEventListener('DOMContentLoaded', function(){
 
 
   <script>
-document.addEventListener("DOMContentLoaded", () => {
-    if (window.Telegram && Telegram.WebApp) {
-        Telegram.WebApp.expand();
-    }
+
+
+let tg = window.Telegram.WebApp;
+tg.requestFullscreen();
+
 });
 </script>
 
