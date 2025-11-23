@@ -480,7 +480,7 @@ function createHabit(name, unit, baseline){
 
 
 
-  function showView(id){
+   function showView(id){
   // переключаем секции
   views.forEach(v => {
     if (v.id === id) v.classList.remove('hidden');
@@ -498,8 +498,8 @@ function createHabit(name, unit, baseline){
   // заголовок + спец-логика для чата/профиля
   if (id === 'view-habit') {
     headerTitle.textContent = 'Привычки';
+    // только внутренний скролл main, без дергания окна
     if (mainEl) mainEl.scrollTop = 0;
-    window.scrollTo(0, 0);
   } else if (id === 'view-chat') {
     headerTitle.textContent = 'Чат';
 
@@ -513,11 +513,11 @@ function createHabit(name, unit, baseline){
     }, 0);
   } else if (id === 'view-profile') {
     headerTitle.textContent = 'Профиль';
-    // Всегда показываем профиль с верха
+    // профиль просто показываем с верха контейнера
     if (mainEl) mainEl.scrollTop = 0;
-    window.scrollTo(0, 0);
   }
 }
+
 
 
   // Calendar renderer for a given container & habit
@@ -1569,15 +1569,27 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   }
 
-  // Nav
-  document.addEventListener('click', (ev)=>{
+  function handleNavTap(ev){
     const navBtn = ev.target.closest('.nav-btn');
-    if(navBtn && navBtn.dataset && navBtn.dataset.view) showView(navBtn.dataset.view);
-  });
+    if (!navBtn || !navBtn.dataset || !navBtn.dataset.view) return;
+
+    // На мобилках первый тап часто просто прячет клаву и не даёт click.
+    // Обрабатываем на touchstart, чтобы всё срабатывало с первого раза.
+    if (ev.type === 'touchstart') {
+      ev.preventDefault();   // чтобы потом не прилетел второй "лишний" click
+    }
+
+    showView(navBtn.dataset.view);
+  }
+
+  // Навигация: и click, и touchstart
+  document.addEventListener('click', handleNavTap);
+  document.addEventListener('touchstart', handleNavTap, { passive: false });
 
   // Init
   renderAll();
   showView('view-habit');
+
 
   renderProfile();
   try{
@@ -1596,16 +1608,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   
 
-  // Debug badge
-  try{
-    const badge = document.createElement('div');
-    badge.textContent = 'JS OK';
-    badge.style.position='fixed'; badge.style.right='10px'; badge.style.bottom='10px';
-    badge.style.background='rgba(0,0,0,0.5)'; badge.style.padding='6px 10px'; badge.style.borderRadius='8px'; badge.style.fontSize='12px';
-    badge.style.zIndex='9999';
-    document.body.appendChild(badge);
-    setTimeout(()=>badge.remove(), 1500);
-  }catch(e){}
+
 })();
 
 // --- Mobile-friendly avatar upload ---
