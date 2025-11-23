@@ -915,8 +915,18 @@ function generatePlan(unit, baseVal, targetVal, termDays, action){
   targetVal = Number(targetVal)||0;
   action = action || extractAction(unit, '');
 
-  const rem = Math.max(0, targetVal - baseVal);
   const prep = makePrep(unit, baseVal, targetVal, action);
+
+  // старт после подготовки
+  let startAfterPrep = baseVal;
+  if (prep.length){
+    startAfterPrep = (unit === 'литры')
+      ? Math.max(baseVal, 0.2)
+      : Math.max(baseVal, prep[prep.length-1].value || baseVal);
+  }
+
+  // ВАЖНО: прирост считаем от конца подготовки, а не от старой базы
+  const rem = Math.max(0, targetVal - startAfterPrep);
 
   // длины четвертей: с подготовкой (срок-12)//4, без — (срок-2)//4
   const cut = prep.length ? 12 : 2;
@@ -932,11 +942,6 @@ function generatePlan(unit, baseVal, targetVal, termDays, action){
     (rem - 0.75*rem) / qDays[3]  // 25% REM / дни
   ];
 
-  let startAfterPrep = baseVal;
-  if(prep.length){
-    startAfterPrep = unit==='литры' ? Math.max(baseVal, 0.2) : Math.max(baseVal, prep[prep.length-1].value||baseVal);
-  }
-
   let cur = startAfterPrep;
   const q1 = makeQuarter(unit, cur, qInc[0], qDays[0], action); cur = q1.length? q1[q1.length-1].value : cur;
   const q2 = makeQuarter(unit, cur, qInc[1], qDays[1], action); cur = q2.length? q2[q2.length-1].value : cur;
@@ -947,6 +952,7 @@ function generatePlan(unit, baseVal, targetVal, termDays, action){
   injectRandoms(body, termDays);
   return [...START_TASKS, ...body];
 }
+
 
 // текущая задача (из плана)
 function getTodayTaskTitle(h){
