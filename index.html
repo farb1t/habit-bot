@@ -256,22 +256,16 @@ html, body { -ms-overflow-style: none; } /* IE/Edge legacy */
     margin: 0 !important;
     border-radius: 0 !important;
   }
- nav.bottom{
-  position: fixed !important;
-  left: 0; 
-  right: 0; 
-  bottom: 0;
-  width: 100%;
-  z-index: 9999 !important; /* ← добавили !important и подняли приоритет */
-  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
-}
-
-main{
-  position: relative;       /* ← добавили */
-  z-index: 1;               /* ← добавили, чтобы main был НИЖЕ nav */
-  padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)) !important;
-}
-
+  nav.bottom{
+    position: fixed !important;
+    left: 0; right: 0; bottom: 0;
+    width: 100%;
+    z-index: 1000;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  main{
+    padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)) !important;
+  }
 }
 </style>
 
@@ -301,16 +295,17 @@ nav.bottom{
 
 
 <style>
-/* === SUPER FIX: nav всегда над main === */
-nav.bottom{
+/* kbfix-2: ensure nav never overlays keyboard */
+body.kb-open nav.bottom{
   position: fixed !important;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 9999 !important; /* ← ставим НАД main */
+  left: 0; right: 0;
+  /* pushed visually below keyboard, но клики не блокируем */
+  bottom: calc(-1 * var(--kb, 0px)) !important;
+  transform: translateY(110%);
+  opacity: 0;
+  /* pointer-events: none;  // УБРАЛИ, чтобы не “съедать” первый тап */
 }
 </style>
-
 
 </head>
 <body data-avatar-ready="1">
