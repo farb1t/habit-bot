@@ -126,10 +126,28 @@
     .task-info{flex:1}
     .complete{background:linear-gradient(90deg,var(--accent),var(--accent-2)); color:#fff}
 
-    /* Chat */
-    .chat{display:flex; flex-direction:column; height:100%}
-    .messages{flex:1; overflow:auto; padding:8px; display:flex; flex-direction:column; gap:10px}
-    .bubble{max-width:78%; padding:10px 12px; border-radius:12px}
+   /* Chat */
+.chat{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  min-height:0;              /* важно: даём блоку право сжиматься при клаве */
+}
+.messages{
+  flex:1;
+  min-height:0;              /* чтобы именно messages ужимались, а не выталкивали input */
+  overflow-y:auto;
+  padding:8px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.bubble{
+  max-width:78%;
+  padding:10px 12px;
+  border-radius:12px;
+}
+
     .bubble.bot{align-self:flex-start; background:rgba(255,255,255,0.03)}
     .bubble.you{align-self:flex-end; background:linear-gradient(90deg,var(--accent),var(--accent-2)); color:#000}
     .chat-input{display:flex; gap:8px; padding:12px}
@@ -273,10 +291,6 @@ nav.bottom{
     .app{ height: 100dvh !important; }
   }
 }
-/* Adjust layout on keyboard open */
-body.kb-open .app{ height: auto !important; min-height: calc(var(--vh, 1vh) * 100); }
-body.kb-open .chat{ height: auto !important; }
-body.kb-open main{ padding-bottom: 12px !important; }
 </style>
 
 
