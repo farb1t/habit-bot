@@ -360,7 +360,7 @@ body.kb-open nav.bottom{
       </div>
     </section>
 
-    <!-- PROFILE VIEW -->
+      <!-- PROFILE VIEW -->
     <section class="view hidden" id="view-profile">
       <div class="profile">
         <label class="avatar" id="avatar-label">
@@ -368,17 +368,48 @@ body.kb-open nav.bottom{
           <div id="avatar-placeholder">👤</div>
           <input accept="image/*" id="avatar-input" style="display:none" type="file"/>
         </label>
-        <div>
-        <div style="text-align:center;">
-  <div class="name" id="profile-name" style="margin:0 auto;">Гость</div>
 
-        </div>
-        <h3 style="margin-top:16px">Награды</h3>
-        <div class="medals" id="medals">
-          <!-- medals injected -->
+        <div>
+          <div style="text-align:center;">
+            <div class="name" id="profile-name" style="margin:0 auto;">Гость</div>
+          </div>
+
+          <!-- Мои правила привычек -->
+          <div class="rules-card">
+            <div class="rules-title">Мои правила привычек</div>
+            <div class="rules-sub">Придумай свои 2–3 главных правила — они сохранятся.</div>
+            <div class="rules-lines">
+              <div class="rule-line" contenteditable="true" data-rule-index="0">
+                Например: начинаю с маленьких шагов
+              </div>
+              <div class="rule-line" contenteditable="true" data-rule-index="1">
+                Например: не пропускаю два дня подряд
+              </div>
+              <div class="rule-line" contenteditable="true" data-rule-index="2">
+                Например: важнее стабильность, чем идеал
+              </div>
+            </div>
+          </div>
+
+          <h3 style="margin-top:16px">Награды</h3>
+          <div class="medals" id="medals">
+            <!-- medals injected -->
+          </div>
+
+          <!-- Поп-ап для наград -->
+          <div class="reward-popup-backdrop hidden" id="reward-popup-backdrop">
+            <div class="reward-popup">
+              <div class="reward-popup-type" id="reward-popup-type"></div>
+              <div class="reward-popup-title" id="reward-popup-title"></div>
+              <div class="reward-popup-habit" id="reward-popup-habit"></div>
+              <div class="reward-popup-meta" id="reward-popup-meta"></div>
+              <button class="reward-popup-close" id="reward-popup-close">Понятно</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
+
   </main>
 
   <nav class="bottom">
@@ -633,6 +664,72 @@ function createHabit(name, unit, baseline){
       profileStreakEl.textContent = 'Streak: ' + s;
     }catch(e){ /* noop */ }
   }
+    // --- Мои правила привычек (3 редактируемые строки в профиле) ---
+  (function(){
+    const RULES_KEY = 'habit_traker_demo_v3_rules_v1';
+
+    function loadRules(){
+      try{
+        const raw = localStorage.getItem(RULES_KEY);
+        if(!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      }catch(e){
+        return [];
+      }
+    }
+
+    function saveRules(arr){
+      try{
+        localStorage.setItem(RULES_KEY, JSON.stringify(arr || []));
+      }catch(e){}
+    }
+
+    function wireRules(){
+      const lines = document.querySelectorAll('.rule-line[data-rule-index]');
+      if(!lines.length) return;
+
+      let saved = loadRules();
+
+      lines.forEach(line=>{
+        if(line.dataset.wired === '1') return;
+        line.dataset.wired = '1';
+
+        const idx = Number(line.dataset.ruleIndex || 0);
+        const val = (saved[idx] || '').trim();
+        if(val){
+          line.textContent = val;
+        }
+
+        line.addEventListener('blur', ()=>{
+          const current = (line.textContent || '').trim();
+          saved = loadRules();
+          saved[idx] = current;
+          saveRules(saved);
+        });
+
+        line.addEventListener('keydown', (e)=>{
+          if(e.key === 'Enter'){
+            e.preventDefault();
+            line.blur();
+          }
+        });
+      });
+    }
+
+    // Подключаемся к существующему renderProfile
+    const origRenderProfile = window.renderProfile;
+    window.renderProfile = function(){
+      if(typeof origRenderProfile === 'function') origRenderProfile();
+      try{ wireRules(); }catch(e){}
+    };
+
+    // На всякий случай, если profile уже показан
+    document.addEventListener('DOMContentLoaded', ()=>{
+      try{ wireRules(); }catch(e){}
+    });
+  })();
+
 
   function computeProgress(h){
     const elapsed = Math.max(1, daysBetween(h.start, isoDate(new Date())));
@@ -1810,6 +1907,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
   .badge.unlocked{animation: pop-in .5s ease both;}
   .badge .label{font-size:11px; color:var(--muted); margin-top:6px; text-transform:uppercase; letter-spacing:.03em}
   .badge .value{font-weight:800; font-size:18px; line-height:1.1}
+    .badge-habit-name{
+    margin-top:4px;
+    font-size:11px;
+    max-width:100%;
+    text-align:center;
+    color:var(--muted,#8f9bad);
+    word-wrap:break-word;
+  }
+
   .badge .aura{
     position:absolute; inset:-2px; border-radius:18px; pointer-events:none;
     background: conic-gradient(from 0deg, rgba(255,107,61,0.0), rgba(255,59,48,0.25), rgba(255,255,255,0.0));
@@ -1819,6 +1925,97 @@ document.addEventListener('DOMContentLoaded', ()=>{
   @keyframes pop-in{ 0%{transform:scale(.7); opacity:0} 60%{transform:scale(1.08); opacity:1} 100%{transform:scale(1)} }
   .badge svg{display:block}
   .medals{gap:12px !important}
+    /* Мои правила привычек */
+  .rules-card{
+    margin-top:16px;
+    padding:12px 14px;
+    border-radius:16px;
+    background:rgba(4,12,18,0.9);
+    border:1px solid rgba(255,255,255,0.06);
+  }
+  .rules-title{
+    font-weight:700;
+    font-size:14px;
+    margin-bottom:4px;
+  }
+  .rules-sub{
+    font-size:12px;
+    color:var(--muted,#8f9bad);
+    margin-bottom:8px;
+  }
+  .rules-lines{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  .rule-line{
+    padding:6px 8px;
+    border-radius:10px;
+    border:1px dashed rgba(255,255,255,0.08);
+    min-height:22px;
+    font-size:13px;
+    outline:none;
+  }
+  .rule-line:focus{
+    border-style:solid;
+    border-color:rgba(255,215,120,0.7);
+    background:rgba(255,215,120,0.04);
+  }
+
+  /* Поп-ап награды */
+  .reward-popup-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.46);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:40;
+  }
+  .reward-popup-backdrop.hidden{
+    display:none;
+  }
+  .reward-popup{
+    width:90%;
+    max-width:320px;
+    border-radius:20px;
+    padding:16px 18px;
+    background:radial-gradient(160px 160px at 50% 0%,rgba(255,255,255,0.06),rgba(0,0,0,0.96));
+    box-shadow:0 18px 45px rgba(0,0,0,0.7);
+    border:1px solid rgba(255,255,255,0.12);
+  }
+  .reward-popup-type{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--muted,#8f9bad);
+    margin-bottom:4px;
+  }
+  .reward-popup-title{
+    font-weight:700;
+    font-size:15px;
+    margin-bottom:4px;
+  }
+  .reward-popup-habit{
+    font-size:13px;
+    margin-bottom:4px;
+  }
+  .reward-popup-meta{
+    font-size:12px;
+    color:var(--muted,#8f9bad);
+    margin-bottom:10px;
+  }
+  .reward-popup-close{
+    width:100%;
+    border-radius:999px;
+    padding:8px 10px;
+    border:none;
+    font-size:13px;
+    font-weight:600;
+    background:linear-gradient(135deg,#ffd166,#ff6b3d);
+    color:#020203;
+  }
+
 
   .toast{
     position:fixed; left:50%; bottom:100px; transform:translateX(-50%);
@@ -2777,6 +2974,292 @@ document.addEventListener('DOMContentLoaded', function(){
   }catch(e){}
 })();
 </script>
+
+  <script>
+(function(){
+  const STORAGE_KEY = 'habit_traker_demo_v3';
+  const AWARDS_KEY  = STORAGE_KEY + '_habitAwards_v1';
+  const STREAK_STEPS = [7,14,21,30,45,60,75,90,100,120];
+
+  function isoDate(d){
+    const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    return t.toISOString().slice(0,10);
+  }
+
+  function getState(){
+    try{ return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); }
+    catch(e){ return null; }
+  }
+
+  function loadAwards(){
+    try{
+      const raw = localStorage.getItem(AWARDS_KEY);
+      const d = raw ? JSON.parse(raw) : null;
+      if(!d || typeof d !== 'object') return { streak:{}, complete:{} };
+      if(!d.streak) d.streak = {};
+      if(!d.complete) d.complete = {};
+      return d;
+    }catch(e){
+      return { streak:{}, complete:{} };
+    }
+  }
+
+  function saveAwards(a){
+    try{ localStorage.setItem(AWARDS_KEY, JSON.stringify(a || {streak:{}, complete:{}})); }
+    catch(e){}
+  }
+
+  // Серия КОНКРЕТНОЙ привычки (сколько дней подряд у неё есть отметка)
+  function computeHabitStreak(h){
+    const arr = Array.isArray(h && h.days) ? h.days : [];
+    if(!arr.length) return 0;
+    const set = new Set(arr);
+    let d = new Date();
+    let streak = 0;
+    while(true){
+      const key = isoDate(d);
+      if(set.has(key)){
+        streak++;
+        d.setDate(d.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  // Основная проверка: ищем новые награды по всем привычкам
+  function scanAwards(){
+    const s = getState();
+    if(!s || !Array.isArray(s.habits)) {
+      renderAwardsUI({habits:[]}, loadAwards());
+      return;
+    }
+
+    const awards = loadAwards();
+    let changed = false;
+    const todayIso = isoDate(new Date());
+
+    (s.habits || []).forEach(h=>{
+      if(!h || !h.id) return;
+      const hid = h.id;
+      const name = (h.name || 'Привычка').trim();
+
+      // --- Серия по привычке ---
+      const curStreak = computeHabitStreak(h);
+      if(!awards.streak[hid]) awards.streak[hid] = {}; // map: порог -> дата
+      STREAK_STEPS.forEach(step=>{
+        const already = !!awards.streak[hid][step];
+        if(curStreak >= step && !already){
+          awards.streak[hid][step] = todayIso;
+          changed = true;
+          try{
+            if(typeof window.showToast === 'function'){
+              window.showToast(`Новая серия по "${name}": ${step} дней!`);
+            }
+          }catch(e){}
+        }
+      });
+
+      // --- Выполненная привычка ---
+      const days = Array.isArray(h.days) ? h.days.length : 0;
+      const target = typeof h.targetDays === 'number' ? Math.max(1, h.targetDays) : null;
+      if(target && days >= target){
+        if(!awards.complete[hid]){
+          awards.complete[hid] = todayIso;
+          changed = true;
+          try{
+            if(typeof window.showToast === 'function'){
+              window.showToast(`Привычка "${name}" выполнена!`);
+            }
+          }catch(e){}
+        }
+      }
+    });
+
+    if(changed) saveAwards(awards);
+    renderAwardsUI(s, awards);
+  }
+
+  // Рендер блока наград в профиле
+  function renderAwardsUI(state, awards){
+    const box = document.getElementById('medals');
+    if(!box) return;
+    awards = awards || loadAwards();
+
+    const habits = Array.isArray(state && state.habits) ? state.habits : [];
+    const byId = new Map();
+    habits.forEach(h=>{ if(h && h.id) byId.set(h.id, h); });
+
+    const list = [];
+
+    // Пробегаем по наградам и собираем список карточек
+    Object.keys(awards.streak || {}).forEach(hid=>{
+      const streakMap = awards.streak[hid] || {};
+      const h = byId.get(hid);
+      const habitName = (h && h.name) ? h.name : 'Привычка';
+
+      Object.keys(streakMap).forEach(stepStr=>{
+        const step = Number(stepStr);
+        list.push({
+          type: 'streak',
+          step,
+          date: streakMap[stepStr],
+          habitName
+        });
+      });
+    });
+
+    Object.keys(awards.complete || {}).forEach(hid=>{
+      const h = byId.get(hid);
+      const habitName = (h && h.name) ? h.name : 'Привычка';
+      list.push({
+        type: 'complete',
+        step: null,
+        date: awards.complete[hid],
+        habitName
+      });
+    });
+
+    // Сортируем: свежие выше, внутри — по типу/количеству дней
+    list.sort((a,b)=>{
+      if(a.date === b.date){
+        if(a.type === b.type){
+          return (b.step || 0) - (a.step || 0);
+        }
+        // полное завершение можно показывать чуть выше
+        return a.type === 'complete' ? -1 : 1;
+      }
+      return a.date < b.date ? 1 : -1; // свежие сначала
+    });
+
+    box.innerHTML = '';
+
+    if(!list.length){
+      const empty = document.createElement('div');
+      empty.className = 'sub';
+      empty.textContent = 'Наград пока нет. Делай маленькие шаги каждый день — и они появятся ✨';
+      box.appendChild(empty);
+      return;
+    }
+
+    list.forEach(aw=>{
+      const card = document.createElement('div');
+      card.className = 'badge unlocked';
+      card.dataset.awType  = aw.type;
+      card.dataset.awStep  = aw.step || '';
+      card.dataset.awHabit = aw.habitName || 'Привычка';
+      card.dataset.awDate  = aw.date || '';
+
+      const labelType = aw.type === 'streak' ? 'Серия' : 'Привычка выполнена';
+      const valueText = aw.type === 'streak' ? `${aw.step} дней` : '';
+      const icon = aw.type === 'streak' ? '🔥' : '🏆';
+
+      card.innerHTML = `
+        <div class="aura"></div>
+        <div class="badge-icon">${icon}</div>
+        <div class="label">${labelType}</div>
+        <div class="value">${valueText}</div>
+        <div class="badge-habit-name">${aw.habitName || ''}</div>
+      `;
+
+      box.appendChild(card);
+    });
+
+    wireAwardPopups();
+  }
+
+  // Поп-ап по клику на награду
+  function wireAwardPopups(){
+    const backdrop = document.getElementById('reward-popup-backdrop');
+    const closeBtn = document.getElementById('reward-popup-close');
+    if(!backdrop) return;
+
+    const typeEl  = document.getElementById('reward-popup-type');
+    const titleEl = document.getElementById('reward-popup-title');
+    const habitEl = document.getElementById('reward-popup-habit');
+    const metaEl  = document.getElementById('reward-popup-meta');
+
+    function close(){
+      backdrop.classList.add('hidden');
+    }
+
+    if(closeBtn && !closeBtn._wired){
+      closeBtn._wired = true;
+      closeBtn.addEventListener('click', close);
+    }
+    if(!backdrop._wired){
+      backdrop._wired = true;
+      backdrop.addEventListener('click', (e)=>{
+        if(e.target === backdrop) close();
+      });
+    }
+
+    const box = document.getElementById('medals');
+    if(!box) return;
+
+    box.querySelectorAll('.badge.unlocked').forEach(card=>{
+      if(card._wiredPop) return;
+      card._wiredPop = true;
+      card.addEventListener('click', ()=>{
+        const type  = card.dataset.awType;
+        const step  = card.dataset.awStep;
+        const habit = card.dataset.awHabit || 'Привычка';
+        const date  = card.dataset.awDate;
+        let dateHuman = '';
+        try{
+          if(date){
+            dateHuman = new Date(date).toLocaleDateString('ru-RU');
+          }
+        }catch(e){}
+
+        typeEl.textContent = type === 'streak'
+          ? 'Награда за серию'
+          : 'Награда за выполненную привычку';
+
+        titleEl.textContent = type === 'streak'
+          ? `${step} дней подряд`
+          : 'Цель достигнута';
+
+        habitEl.textContent = `Привычка: ${habit}`;
+        metaEl.textContent  = dateHuman ? `Получено: ${dateHuman}` : '';
+
+        backdrop.classList.remove('hidden');
+      });
+    });
+  }
+
+  // Делаем так, чтобы другие патчи могли вызвать наш рендер
+  window.renderBadges = function(){
+    const s = getState() || {habits:[]};
+    renderAwardsUI(s, loadAwards());
+  };
+
+  // Подключаемся к renderProfile, чтобы при заходе в профиль обновлять награды
+  (function hookProfile(){
+    const orig = window.renderProfile;
+    window.renderProfile = function(){
+      if(typeof orig === 'function') orig();
+      scanAwards();
+    };
+  })();
+
+  // Реакция на клики по чекбоксам (отметка/снятие «сегодня»)
+  document.addEventListener('click', (e)=>{
+    const t = e.target.closest('.today-check,.check');
+    if(t){
+      setTimeout(scanAwards, 120);
+    }
+  }, {capture:true, passive:true});
+
+  // Первый старт
+  document.addEventListener('DOMContentLoaded', ()=>{
+    scanAwards();
+  });
+
+})();
+</script>
+
 
 
   <script>
