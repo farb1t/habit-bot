@@ -781,41 +781,60 @@ function createHabit(name, unit, baseline){
   btn.style.marginTop = '8px';
   btn.style.fontSize = '13px';
 
-btn.addEventListener('click', ()=>{
-  if(!confirm('Удалить все привычки из корзины безвозвратно?')) return;
-  try{
-    const hadItems = Array.isArray(state.trash) && state.trash.length > 0;
+  btn.addEventListener('click', ()=>{
+    if(!confirm('Удалить все привычки из корзины безвозвратно?')) return;
+    try{
+      const hadItems = Array.isArray(state.trash) && state.trash.length > 0;
 
-    // очищаем корзину
-    state.trash = [];
+      if (hadItems) {
+        // СНАЧАЛА обрабатываем награды для привычек из корзины
+        try{
+          const trashCopy = Array.isArray(state.trash) ? state.trash.slice() : [];
+          trashCopy.forEach(h=>{
+            if (!h || !h.id) return;
 
-    if (hadItems) {
-      // снимаем ограничение
-      state.creationLockUntil = null;
-      saveState(state);
-      renderTrash();
-      renderAll();
+            const days = Array.isArray(h.days) ? h.days.length : 0;
+            const target = typeof h.targetDays === 'number'
+              ? Math.max(1, h.targetDays)
+              : null;
+            const completed = !!(target && days >= target);
 
-      // сообщение о снятии + сразу перезапуск мастера с вопросом про единицы
-      try {
-        pushMsg?.('Корзина очищена. Ограничение на создание новой привычки снято.', 'bot');
-        // запускаем ваш 4-шаговый мастер с шагом 1/4
-        resetWizard?.();      // только состояние, без сообщения
-        startWizard?.();      // отправит: «1/4. В чём измеряем цель? …»
-        showView?.('view-chat');
-      } catch(e){}
-      alert('Корзина очищена. Ограничение снято.');
-    } else {
-      // корзина была пустой — ничего не меняем
-      saveState(state);
-      renderTrash();
-      renderAll();
+            // если привычка НЕ выполнена — награды по ней удаляем
+            // если выполнена — награды оставляем (история)
+            if (typeof window.purgeHabitFromAwards === 'function') {
+              window.purgeHabitFromAwards(h.id, completed);
+            }
+          });
+        }catch(e){ console.warn(e); }
 
-      try { pushMsg?.('Корзина была пустой. Ограничение не изменилось.', 'bot'); } catch(e){}
-      alert('Корзина пуста. Ограничение не изменено.');
-    }
-  }catch(e){ console.warn(e); }
-});
+        // теперь уже реально очищаем корзину
+        state.trash = [];
+
+        // снимаем ограничение
+        state.creationLockUntil = null;
+        saveState(state);
+        renderTrash();
+        renderAll();
+
+        // сообщение о снятии + сразу перезапуск мастера с вопросом про единицы
+        try {
+          pushMsg?.('Корзина очищена. Ограничение на создание новой привычки снято.', 'bot');
+          resetWizard?.();      // только состояние, без сообщения
+          startWizard?.();      // отправит: «1/4. В чём измеряем цель? …»
+          showView?.('view-chat');
+        } catch(e){}
+        alert('Корзина очищена. Ограничение снято.');
+      } else {
+        // корзина была пустой — ничего не меняем
+        saveState(state);
+        renderTrash();
+        renderAll();
+
+        try { pushMsg?.('Корзина была пустой. Ограничение не изменилось.', 'bot'); } catch(e){}
+        alert('Корзина пуста. Ограничение не изменено.');
+      }
+    }catch(e){ console.warn(e); }
+  });
 
 
 
@@ -1962,27 +1981,27 @@ document.addEventListener('DOMContentLoaded', ()=>{
     background:rgba(255,215,120,0.04);
   }
 
-  /* Поп-ап награды */
+  /* Поп-ап награды (без прозрачности, более читаемый) */
   .reward-popup-backdrop{
     position:fixed;
     inset:0;
-    background:rgba(0,0,0,0.46);
+    background:rgba(0,0,0,0.78); /* темный плотный фон */
     display:flex;
     align-items:center;
     justify-content:center;
-    z-index:40;
+    z-index:2147483646;
   }
   .reward-popup-backdrop.hidden{
     display:none;
   }
   .reward-popup{
     width:90%;
-    max-width:320px;
+    max-width:340px;
     border-radius:20px;
     padding:16px 18px;
-    background:radial-gradient(160px 160px at 50% 0%,rgba(255,255,255,0.06),rgba(0,0,0,0.96));
-    box-shadow:0 18px 45px rgba(0,0,0,0.7);
-    border:1px solid rgba(255,255,255,0.12);
+    background:linear-gradient(180deg,#0b1118,#020309); /* сплошной тёмный градиент */
+    box-shadow:0 18px 45px rgba(0,0,0,0.9);
+    border:1px solid rgba(255,255,255,0.16);
   }
   .reward-popup-type{
     font-size:11px;
@@ -2012,9 +2031,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
     border:none;
     font-size:13px;
     font-weight:600;
-    background:linear-gradient(135deg,#ffd166,#ff6b3d);
-    color:#020203;
+    background:linear-gradient(135deg,#ffef9a,#ffd166 50%,#f7b733 80%);
+    color:#1a1400;
+    cursor:pointer;
   }
+
 
 
   .toast{
@@ -3008,6 +3029,33 @@ document.addEventListener('DOMContentLoaded', function(){
     try{ localStorage.setItem(AWARDS_KEY, JSON.stringify(a || {streak:{}, complete:{}})); }
     catch(e){}
   }
+    // Удаление наград, связанных с конкретной привычкой
+  // keepIfCompleted === true  → привычка завершена, НИЧЕГО не трогаем
+  function purgeHabitFromAwards(habitId, keepIfCompleted){
+    if(!habitId) return;
+    const a = loadAwards();
+    if(!a) return;
+
+    if (keepIfCompleted) {
+      // Привычка выполнена — все её награды остаются
+      saveAwards(a);
+      return;
+    }
+
+    // Привычка не выполнена — чистим все её награды
+    if (a.streak && a.streak[habitId]) {
+      delete a.streak[habitId];
+    }
+    if (a.complete && a.complete[habitId]) {
+      delete a.complete[habitId];
+    }
+
+    saveAwards(a);
+  }
+
+  // Делаем доступным для других патчей
+  window.purgeHabitFromAwards = purgeHabitFromAwards;
+
 
   // Серия КОНКРЕТНОЙ привычки (сколько дней подряд у неё есть отметка)
   function computeHabitStreak(h){
