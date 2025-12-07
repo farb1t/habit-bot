@@ -864,6 +864,10 @@ function createHabit(name, unit, baseline){
 
   // Render ALL habits
   function renderAll(){
+      try {
+    rollDailyPointers(state);   // проверяем, наступил ли новый день
+    saveState(state);           // сохраняем изменения (сдвиг idx)
+  } catch(e){}
     listRoot.innerHTML='';
     if(!state.habits.length){
       const empty = document.createElement('div');
