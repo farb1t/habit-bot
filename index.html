@@ -1585,7 +1585,7 @@ saveState(state);
   
   w.step = 'term';
   saveState(state);
-  pushMsg('4/4. На какой срок? Напиши «X дней», минимум 50. Если посчитаю привычку прегруженной увеличю срок. ', 'bot');
+  pushMsg('4/4. На какой срок? Напиши «X дней», минимум 50. Я немного изменю заданный срок для оптимально сбалансированного прогресса. ', 'bot');
   return;
 }
 
@@ -1593,7 +1593,7 @@ saveState(state);
    case 'term': {
   const dRaw = parseTermDays(text);
   if(!dRaw){
-    pushMsg('Укажи число дней (минимум 50). Пример: 90. Если посчитаю привычку прегруженной, увеличу срок.', 'bot');
+    pushMsg('Укажи число дней (минимум 50). Пример: 90. Я немного изменю заданный срок для оптимально сбалансированного прогресса. ', 'bot');
     return;
   }
 
@@ -2820,6 +2820,14 @@ document.addEventListener('DOMContentLoaded', function(){
 }
 
 </style>
+<style>
+/* отключаем визуальные праздники, не трогая логику */
+.toast,
+.sparkles{
+  display: none !important;
+}
+</style>
+
 <script>
 (function(){
   try{
